@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "712610418450",
+    "project_id": "warunku-7b5c7",
+    "storage_bucket": "warunku-7b5c7.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:712610418450:android:12588d49354784157dadcb",
+        "android_client_info": {
+          "package_name": "com.example.warunku"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "712610418450-1f9927jcvtkilt62nuplfg629o9bait8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD6Sm_qWzQrDanwFChCNf_bZWMpy1Wvc_U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "712610418450-1f9927jcvtkilt62nuplfg629o9bait8.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "712610418450-inbohbnc18bjqaldr3q4fmjsbkf4bp4q.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.warunkApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
