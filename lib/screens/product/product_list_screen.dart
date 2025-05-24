@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../models/product.dart';
+import '../../models/product.dart';
 import 'product_detail_screen.dart';
 import 'product_form_screen.dart';
-import '../services/api_services.dart';
-import '../widgets/product_card.dart';
-import '../widgets/search_bar.dart';
+import '../../services/product_service.dart';
+import '../../widgets/product_card.dart';
+import '../../widgets/search_bar.dart';
 
 import 'dart:async';
 
@@ -19,6 +19,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
   bool isLoading = true;
   String searchQuery = '';
   Timer? _debounce;
+
+  // Create an instance of ProductService
+  final ProductService _productService = ProductService(); // NEW INSTANCE
 
   static const String _noProductsFoundText = 'No products found.';
   static const String _errorFetchingProductsText = 'Error fetching products: ';
@@ -39,17 +42,47 @@ class _ProductListScreenState extends State<ProductListScreen> {
     if (!mounted) return;
     setState(() => isLoading = true);
     try {
-      final data = await ProductService.getAllProducts();
+      // CORRECTED WAY: Call the method on the instance
+      final data = await _productService.getAllProducts(
+        searchTerm: searchQuery,
+      ); // Pass search query
+      // Note: I've assumed getAllProducts now takes an optional searchTerm.
+      // Adjust if your ProductService.getAllProducts signature is different.
+      // If it doesn't take a searchTerm, you'll filter locally *after* fetching all products.
+
+      if (!mounted) return; // Check mounted again after await
       setState(() {
         products = data;
-        filteredProducts = data; // Initialize filtered list
+        // Apply local filtering if `getAllProducts` doesn't filter on backend
+        // or if you want to refine search on already fetched data
+        if (searchQuery.isEmpty) {
+          filteredProducts = List.from(products);
+        } else {
+          _filterProductsLocally(); // Call the local filter method
+        }
         isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => isLoading = false);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('$_errorFetchingProductsText$e')));
+    }
+  }
+
+  void _filterProductsLocally() {
+    if (searchQuery.isEmpty) {
+      filteredProducts = List.from(products);
+    } else {
+      filteredProducts =
+          products
+              .where(
+                (product) => product.name.toLowerCase().contains(
+                  searchQuery.toLowerCase(),
+                ),
+              )
+              .toList();
     }
   }
 
@@ -58,9 +91,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
       context,
       MaterialPageRoute(builder: (_) => ProductFormScreen()),
     );
-    // If ProductFormScreen pops with `true`, it means data might have changed
     if (result == true && mounted) {
-      fetchProducts();
+      fetchProducts(); // Re-fetch products or only the affected ones
     }
   }
 
@@ -69,7 +101,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
       context,
       MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
     );
-    // If ProductDetailScreen pops with `true`, it means data might have changed
     if (result == true && mounted) {
       fetchProducts();
     }
@@ -81,18 +112,16 @@ class _ProductListScreenState extends State<ProductListScreen> {
       if (!mounted) return;
       setState(() {
         searchQuery = query;
-        if (query.isEmpty) {
-          filteredProducts = List.from(products);
-        } else {
-          filteredProducts =
-              products
-                  .where(
-                    (product) => product.name.toLowerCase().contains(
-                      query.toLowerCase(),
-                    ),
-                  )
-                  .toList();
-        }
+        // Option 1: Re-fetch from backend with search term
+        fetchProducts();
+
+        // Option 2: If you prefer local filtering after an initial full fetch
+        // _filterProductsLocally();
+        // if (products.isNotEmpty && query.isNotEmpty) {
+        //   _filterProductsLocally();
+        // } else if (query.isEmpty) {
+        //    filteredProducts = List.from(products);
+        // }
       });
     });
   }
@@ -102,13 +131,22 @@ class _ProductListScreenState extends State<ProductListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: ProductSearchBar(onChanged: updateSearchQuery),
-        backgroundColor: Theme.of(context).primaryColor,
+        // backgroundColor: Theme.of(context).primaryColor, // Assuming this comes from your theme
       ),
       body:
           isLoading
               ? const Center(child: CircularProgressIndicator())
-              : filteredProducts.isEmpty
-              ? const Center(child: Text('$_noProductsFoundText'))
+              : filteredProducts.isEmpty && searchQuery.isNotEmpty
+              ? Center(child: Text('No products found for "$searchQuery".'))
+              : filteredProducts.isEmpty &&
+                  products
+                      .isNotEmpty // No search query but still no filtered results (should not happen if filter logic is correct)
+              ? const Center(child: Text(_noProductsFoundText))
+              : products
+                  .isEmpty // No products at all
+              ? const Center(
+                child: Text('No products available.'),
+              ) // More specific message
               : RefreshIndicator(
                 onRefresh: fetchProducts,
                 child: ListView.builder(
