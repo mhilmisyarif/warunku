@@ -129,4 +129,11 @@ class ProductService {
       throw Exception('Failed to connect or upload image: $e');
     }
   }
+
+  String getProductImageBaseUrl() {
+    return ApiConstants.baseUrl.replaceAll(
+      '/api',
+      '',
+    ); // Or your actual base URL for static files
+  }
 }
