@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart'; // For date formatting
+import 'package:warunku/screens/debt/debt_record_form_screen.dart';
+import '../customer/customer_list_screen.dart'; // For navigating to select a customer
 import '../../blocs/debt/debt_bloc.dart';
 import '../../models/debt_record.dart';
 import '../../models/customer.dart'; // To potentially display customer name if ID only
 // import '../../widgets/search_bar.dart'; // We might need a more complex filter UI here
 // Placeholder for navigation
-// import 'debt_record_form_screen.dart';
+import 'debt_record_form_screen.dart';
 // import 'debt_detail_screen.dart';
 
 class DebtListScreen extends StatefulWidget {
@@ -29,8 +31,8 @@ class _DebtListScreenState extends State<DebtListScreen> {
   int _currentPage = 1; // Keep track of the current page for displayed data
 
   // TODO: Implement date range filter UI and state
-  // DateTime? _startDateFilter;
-  // DateTime? _endDateFilter;
+  DateTime? _startDateFilter;
+  DateTime? _endDateFilter;
 
   @override
   void initState() {
@@ -103,25 +105,58 @@ class _DebtListScreenState extends State<DebtListScreen> {
     return currentScroll >= (maxScroll * 0.9);
   }
 
-  void _navigateToDebtForm({DebtRecord? debtRecord}) {
-    // Placeholder for actual navigation
-    // Navigator.push(
-    //   context,
-    //   MaterialPageRoute(
-    //     builder: (context) => DebtRecordFormScreen(debtRecord: debtRecord, customer: widget.filterByCustomer),
-    //   ),
-    // ).then((success) {
-    //   if (success == true) {
-    //     _loadDebts(refresh: true);
-    //   }
-    // });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Navigate to Debt Form (to be implemented). Editing: ${debtRecord?.id ?? 'New Debt'}',
+  void _navigateToDebtForm({DebtRecord? debtRecord}) async {
+    // Make it async
+    Customer? customerForDebt;
+
+    if (widget.filterByCustomer != null) {
+      customerForDebt = widget.filterByCustomer;
+    } else {
+      // If no specific customer is pre-selected (e.g., viewing all debts),
+      // we need to let the user choose a customer.
+      final selectedCustomer = await Navigator.push<Customer?>(
+        // Expect a Customer or null
+        context,
+        MaterialPageRoute(
+          // You might want a dedicated customer selection screen/dialog
+          // For now, let's reuse CustomerListScreen for selection (needs modification to return selection)
+          // OR, for simplicity here, show a dialog to pick from existing customers
+          // This is a simplified example for customer selection:
+          builder:
+              (context) =>
+                  const CustomerListScreen(), // This screen needs to be adapted to return a selected customer
+          // Or show a simpler selection dialog
         ),
-      ),
-    );
+      );
+
+      if (selectedCustomer == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No customer selected. Debt creation cancelled.'),
+          ),
+        );
+        return; // User cancelled or didn't select a customer
+      }
+      customerForDebt = selectedCustomer;
+    }
+
+    // At this point, customerForDebt should be non-null if we proceed
+    if (customerForDebt != null) {
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder:
+              (context) => DebtRecordFormScreen(
+                customer:
+                    customerForDebt!, // Now we are sure it's not null here
+                debtRecordToEdit: debtRecord,
+              ),
+        ),
+      );
+      if (result == true && mounted) {
+        _loadDebts(refresh: true);
+      }
+    }
   }
 
   void _navigateToDebtDetails(DebtRecord debt) {

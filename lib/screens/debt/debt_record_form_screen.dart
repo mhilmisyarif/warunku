@@ -7,6 +7,7 @@ import '../../models/customer.dart';
 import '../../models/debt_record.dart';
 import '../../models/product.dart'; // To potentially select products
 import '../../services/product_service.dart'; // To fetch product details/prices
+import '../../widgets/product_selection_dialog.dart';
 
 // A temporary class to manage form state for each debt item before saving
 class _DebtItemEntry {
@@ -194,62 +195,31 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
     // This is a very simplified example.
     try {
       // This is just an example, you'd have a proper product selection UI
-      final products = await _productService.getAllProducts(
-        searchTerm: "",
-      ); // Fetch some products
-      if (products.isNotEmpty) {
-        final selectedProduct = await showDialog<Product?>(
-          context: context,
-          builder:
-              (context) => SimpleDialog(
-                title: const Text('Select Product'),
-                children:
-                    products
-                        .map(
-                          (p) => SimpleDialogOption(
-                            onPressed: () => Navigator.pop(context, p),
-                            child: Text(p.name),
-                          ),
-                        )
-                        .toList(),
-              ),
-        );
+      final ProductSelectionResult?
+      result = await showDialog<ProductSelectionResult>(
+        context: context, // The context of DebtRecordFormScreen
+        builder: (BuildContext dialogContext) {
+          // We can provide the ProductBloc to the dialog if it's not already accessible
+          // However, ProductSelectionDialog uses context.read<ProductBloc>()
+          // which means ProductBloc must be an ancestor of this dialogContext.
+          // This should be fine if ProductBloc is provided by MultiBlocProvider in main.dart
+          return const ProductSelectionDialog();
+        },
+      );
 
-        if (selectedProduct != null && selectedProduct.units.isNotEmpty) {
-          // Now let user select a unit
-          final selectedUnit = await showDialog<ProductUnit?>(
-            context: context,
-            builder:
-                (context) => SimpleDialog(
-                  title: Text('Select Unit for ${selectedProduct.name}'),
-                  children:
-                      selectedProduct.units
-                          .map(
-                            (u) => SimpleDialogOption(
-                              onPressed: () => Navigator.pop(context, u),
-                              child: Text(
-                                '${u.label} - (${NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(u.sellingPrice)})',
-                              ),
-                            ),
-                          )
-                          .toList(),
-                ),
-          );
-
-          if (selectedUnit != null) {
-            setState(() {
-              final entry = _itemEntries[itemIndex];
-              entry.selectedProduct = selectedProduct;
-              entry.selectedUnit = selectedUnit;
-              entry.productId = selectedProduct.id;
-              entry.productNameController.text = selectedProduct.name;
-              entry.unitLabelController.text = selectedUnit.label;
-              entry.priceAtTimeController.text =
-                  selectedUnit.sellingPrice.toString();
-              _calculateGrandTotal(); // Recalculate after price might change
-            });
-          }
-        }
+      if (result != null) {
+        setState(() {
+          final entry = _itemEntries[itemIndex];
+          entry.selectedProduct = result.product;
+          entry.selectedUnit = result.selectedUnit;
+          entry.productId = result.product.id;
+          entry.productNameController.text = result.product.name;
+          entry.unitLabelController.text = result.selectedUnit.label;
+          // Use the current selling price from the selected unit as the priceAtTimeOfDebt
+          entry.priceAtTimeController.text =
+              result.selectedUnit.sellingPrice.toString();
+          _calculateGrandTotal();
+        });
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
