@@ -43,7 +43,14 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
         TextEditingController(); // Optional
     final TextEditingController paymentNotesController =
         TextEditingController();
-    // Payment date will default to now, or you can add a DatePicker
+
+    // Controller and variable for the Payment Date
+    final TextEditingController paymentDateController = TextEditingController(
+      text: DateFormat('yyyy-MM-dd').format(DateTime.now()), // Default to today
+    );
+    DateTime selectedPaymentDate =
+        DateTime.now(); // Holds the actual DateTime object
+
     final GlobalKey<FormState> formKey = GlobalKey<FormState>();
     double remainingBalance = currentDebt.totalAmount - currentDebt.amountPaid;
     bool _isProcessingPayment = false; // Local state for dialog's loading
@@ -105,6 +112,46 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
                         ),
                         const SizedBox(height: 10),
                         TextFormField(
+                          // Payment Date Picker
+                          controller: paymentDateController,
+                          decoration: const InputDecoration(
+                            labelText: 'Payment Date*',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            suffixIcon: Icon(Icons.calendar_today),
+                          ),
+                          readOnly: true, // Make it read-only
+                          onTap: () async {
+                            final DateTime? pickedDate = await showDatePicker(
+                              context: dialogContext, // Use dialogContext here
+                              initialDate: selectedPaymentDate,
+                              firstDate: DateTime(
+                                2000,
+                              ), // Or a more reasonable start date
+                              lastDate:
+                                  DateTime.now(), // Prevent future dates for payments
+                            );
+                            if (pickedDate != null &&
+                                pickedDate != selectedPaymentDate) {
+                              stfSetState(() {
+                                // Use StatefulBuilder's setState to update the dialog UI
+                                selectedPaymentDate = pickedDate;
+                                paymentDateController.text = DateFormat(
+                                  'yyyy-MM-dd',
+                                ).format(selectedPaymentDate);
+                              });
+                            }
+                          },
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please select a payment date';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 10),
+
+                        TextFormField(
                           controller: paymentMethodController,
                           decoration: const InputDecoration(
                             labelText: 'Payment Method (Optional)',
@@ -141,7 +188,8 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
                     if (formKey.currentState!.validate()) {
                       final newPaymentEntry = PaymentEntry(
                         amount: double.parse(paymentAmountController.text),
-                        paymentDate: DateTime.now(), // Or use a date picker
+                        paymentDate:
+                            selectedPaymentDate, // Use the selectedPaymentDate
                         method:
                             paymentMethodController.text.trim().isNotEmpty
                                 ? paymentMethodController.text.trim()
