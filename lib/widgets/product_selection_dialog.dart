@@ -1,13 +1,13 @@
+// lib/widgets/product_selection_dialog.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:intl/intl.dart'; // For currency formatting
+import 'package:intl/intl.dart';
 import 'package:warunku/blocs/products/product_event.dart';
 import 'package:warunku/blocs/products/product_state.dart';
 import '../models/product.dart';
-import '../blocs/products/product_bloc.dart'; // Assuming you use ProductBloc for searching
+import '../blocs/products/product_bloc.dart';
 
-// Data class to return selected product and unit
 class ProductSelectionResult {
   final Product product;
   final ProductUnit selectedUnit;
@@ -25,16 +25,14 @@ class ProductSelectionDialog extends StatefulWidget {
 class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
   String _searchTerm = '';
   Timer? _debounce;
-  List<Product> _products = []; // To hold the search results
+  // No need for _products list here if BlocBuilder handles it directly from ProductBloc state
 
   @override
   void initState() {
     super.initState();
-    // Initial load or search if needed, or search as user types
-    // For simplicity, we'll load based on search term changes.
-    // Ensure ProductBloc is provided above the context where this dialog is shown.
-    // Or, fetch initially with an empty search term.
-    _fetchProducts();
+    // Initial fetch if desired, or rely on search
+    // If ProductBloc's initial state is ProductLoaded, this isn't strictly needed for empty search
+    // context.read<ProductBloc>().add(const SearchProducts("")); // Load all initially or by default
   }
 
   @override
@@ -43,29 +41,22 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
     super.dispose();
   }
 
-  void _fetchProducts() {
-    // Using ProductBloc from context
-    context.read<ProductBloc>().add(
-      SearchProducts(_searchTerm),
-    ); // Dispatch search event
-  }
-
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () {
-      setState(() {
-        _searchTerm = query;
-      });
-      _fetchProducts();
+      // No need to setState for _searchTerm if it's only used for dispatching
+      context.read<ProductBloc>().add(SearchProducts(query));
     });
   }
 
-  Future<void> _onProductSelected(
-    BuildContext dialogContext,
+  Future<void> _onProductTapped(
+    BuildContext dialogPageContext,
     Product product,
   ) async {
     if (product.units.isEmpty) {
-      ScaffoldMessenger.of(dialogContext).showSnackBar(
+      Navigator.of(dialogPageContext).pop(); // Close product selection
+      ScaffoldMessenger.of(context).showSnackBar(
+        // Use original context for SnackBar
         const SnackBar(
           content: Text('Selected product has no units defined.'),
           backgroundColor: Colors.orange,
@@ -74,20 +65,16 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
       return;
     }
 
+    ProductUnit? chosenUnit;
+
     if (product.units.length == 1) {
-      // If only one unit, select it automatically
-      Navigator.of(dialogContext).pop(
-        ProductSelectionResult(
-          product: product,
-          selectedUnit: product.units.first,
-        ),
-      );
+      chosenUnit = product.units.first;
     } else {
-      // Let user pick a unit
-      final selectedUnit = await showDialog<ProductUnit?>(
-        context: dialogContext, // Use the dialog's context
+      chosenUnit = await showDialog<ProductUnit?>(
+        context:
+            dialogPageContext, // Use the context of the current dialog page
         builder:
-            (context) => AlertDialog(
+            (unitDialogContext) => AlertDialog(
               title: Text('Select Unit for ${product.name}'),
               content: SizedBox(
                 width: double.maxFinite,
@@ -106,7 +93,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
                         ).format(unit.sellingPrice),
                       ),
                       onTap: () {
-                        Navigator.of(context).pop(unit);
+                        Navigator.of(unitDialogContext).pop(unit);
                       },
                     );
                   },
@@ -115,30 +102,31 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
               actions: <Widget>[
                 TextButton(
                   child: const Text('Cancel'),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
+                  onPressed: () => Navigator.of(unitDialogContext).pop(),
                 ),
               ],
             ),
       );
-
-      if (selectedUnit != null) {
-        Navigator.of(dialogContext).pop(
-          ProductSelectionResult(product: product, selectedUnit: selectedUnit),
-        );
-      }
     }
+
+    if (chosenUnit != null) {
+      // Pop the main ProductSelectionDialog with the result
+      Navigator.of(
+        dialogPageContext,
+      ).pop(ProductSelectionResult(product: product, selectedUnit: chosenUnit));
+    }
+    // If chosenUnit is null (e.g., unit selection was cancelled), do nothing, dialog remains.
+    // Or you could pop with null: Navigator.of(dialogPageContext).pop();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This dialog will be shown using showDialog, so it gets its own context.
     return AlertDialog(
       title: const Text('Select Product'),
+      contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       content: SizedBox(
-        width: double.maxFinite, // Make dialog wider
-        height: MediaQuery.of(context).size.height * 0.6, // Adjust height
+        width: double.maxFinite,
+        height: MediaQuery.of(context).size.height * 0.7,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -158,42 +146,31 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
             Expanded(
               child: BlocBuilder<ProductBloc, ProductState>(
                 builder: (context, state) {
-                  if (state is ProductLoading && _products.isEmpty) {
+                  if (state is ProductLoading) {
                     return const Center(child: CircularProgressIndicator());
                   } else if (state is ProductLoaded) {
-                    // Update local list if the state's products are different
-                    // This simplistic check might need refinement based on how search is triggered
-                    _products = state.products;
-                  } else if (state is ProductError && _products.isEmpty) {
+                    if (state.products.isEmpty) {
+                      return const Center(child: Text('No products found.'));
+                    }
+                    return ListView.builder(
+                      itemCount: state.products.length,
+                      itemBuilder: (BuildContext context, int index) {
+                        final product = state.products[index];
+                        return ListTile(
+                          title: Text(product.name),
+                          subtitle: Text(product.category),
+                          onTap:
+                              () => _onProductTapped(
+                                this.context,
+                                product,
+                              ), // Pass AlertDialog's context
+                        );
+                      },
+                    );
+                  } else if (state is ProductError) {
                     return Center(child: Text('Error: ${state.message}'));
                   }
-
-                  if (_products.isEmpty && _searchTerm.isNotEmpty) {
-                    return const Center(
-                      child: Text('No products found for your search.'),
-                    );
-                  } else if (_products.isEmpty) {
-                    return const Center(
-                      child: Text('Type to search products.'),
-                    );
-                  }
-
-                  return ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _products.length,
-                    itemBuilder: (BuildContext context, int index) {
-                      final product = _products[index];
-                      return ListTile(
-                        title: Text(product.name),
-                        subtitle: Text(product.category),
-                        onTap:
-                            () => _onProductSelected(
-                              this.context,
-                              product,
-                            ), // Pass this.context (AlertDialog's context)
-                      );
-                    },
-                  );
+                  return const Center(child: Text('Type to search products.'));
                 },
               ),
             ),
@@ -204,7 +181,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
         TextButton(
           child: const Text('Cancel'),
           onPressed: () {
-            Navigator.of(context).pop(); // Close the dialog, returning null
+            Navigator.of(context).pop();
           },
         ),
       ],

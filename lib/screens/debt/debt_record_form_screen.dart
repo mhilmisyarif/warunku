@@ -8,6 +8,7 @@ import '../../models/debt_record.dart';
 import '../../models/product.dart'; // To potentially select products
 import '../../services/product_service.dart'; // To fetch product details/prices
 import '../../widgets/product_selection_dialog.dart';
+import '../../blocs/products/product_bloc.dart';
 
 // A temporary class to manage form state for each debt item before saving
 class _DebtItemEntry {
@@ -197,27 +198,28 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
       // This is just an example, you'd have a proper product selection UI
       final ProductSelectionResult?
       result = await showDialog<ProductSelectionResult>(
-        context: context, // The context of DebtRecordFormScreen
+        context: context,
         builder: (BuildContext dialogContext) {
-          // We can provide the ProductBloc to the dialog if it's not already accessible
-          // However, ProductSelectionDialog uses context.read<ProductBloc>()
-          // which means ProductBloc must be an ancestor of this dialogContext.
-          // This should be fine if ProductBloc is provided by MultiBlocProvider in main.dart
+          // If ProductSelectionDialog relies on context.read<ProductBloc>(),
+          // make sure ProductBloc is provided above this point in the widget tree.
+          // It's usually provided in main.dart via MultiBlocProvider.
           return const ProductSelectionDialog();
         },
       );
 
-      if (result != null) {
+      if (result != null && mounted) {
+        // Check mounted after async gap
         setState(() {
           final entry = _itemEntries[itemIndex];
           entry.selectedProduct = result.product;
           entry.selectedUnit = result.selectedUnit;
-          entry.productId = result.product.id;
+          entry.productId = result.product.id; // Ensure product ID is non-null
           entry.productNameController.text = result.product.name;
           entry.unitLabelController.text = result.selectedUnit.label;
-          // Use the current selling price from the selected unit as the priceAtTimeOfDebt
           entry.priceAtTimeController.text =
               result.selectedUnit.sellingPrice.toString();
+          // Quantity controller should remain as is, or default to 1 if product changes significantly
+          // entry.quantityController.text = '1'; // Optional: Reset quantity on new product selection
           _calculateGrandTotal();
         });
       }
@@ -357,126 +359,139 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8.0),
       child: Padding(
-        padding: const EdgeInsets.all(8.0),
+        padding: const EdgeInsets.all(12.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    entry.selectedProduct?.name ?? 'Select Product',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  child: InkWell(
+                    onTap: () => _selectProductForItem(index),
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'Product*',
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 15,
+                        ),
+                      ),
+                      child: Text(
+                        entry.selectedProduct?.name ?? 'Tap to select product',
+                        style: TextStyle(
+                          color:
+                              entry.selectedProduct == null
+                                  ? Theme.of(context).hintColor
+                                  : null,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.search, color: Colors.blue),
-                  tooltip: 'Select Product',
-                  onPressed: () => _selectProductForItem(index),
-                ),
-                if (_itemEntries.length >
-                    1) // Don't allow removing the last item easily
+                if (entry.selectedProduct != null)
+                  IconButton(
+                    icon: Icon(Icons.clear, color: Colors.grey[600]),
+                    tooltip: 'Clear Product Selection',
+                    onPressed: () {
+                      setState(() {
+                        _itemEntries[index] = _DebtItemEntry(
+                          quantity: entry.quantityController.text,
+                        ); // Keep quantity
+                        _calculateGrandTotal();
+                      });
+                    },
+                  ),
+                if (_itemEntries.length > 1)
                   IconButton(
                     icon: const Icon(
                       Icons.remove_circle_outline,
                       color: Colors.red,
                     ),
-                    tooltip: 'Remove Item',
+                    tooltip: 'Remove This Item',
                     onPressed: () => _removeItemEntry(index),
                   ),
               ],
             ),
-            const SizedBox(height: 8),
-            // Display selected product details if available
-            if (entry.selectedProduct != null)
-              TextFormField(
-                controller: entry.productNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Product Name (Auto-filled)',
-                ),
-                readOnly: true, // Usually read-only after selection
+            const SizedBox(height: 10),
+            // Unit, Quantity, Price, Subtotal
+            if (entry.selectedProduct != null) ...[
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextFormField(
+                      controller: entry.unitLabelController,
+                      decoration: const InputDecoration(
+                        labelText: 'Unit',
+                        border: OutlineInputBorder(),
+                      ),
+                      readOnly: true, // Unit is set via selection
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: TextFormField(
+                      controller: entry.quantityController,
+                      decoration: const InputDecoration(
+                        labelText: 'Qty*',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) return 'Qty?';
+                        final dVal = double.tryParse(value);
+                        if (dVal == null || dVal <= 0) return 'Invalid';
+                        return null;
+                      },
+                      onChanged: (_) => _calculateGrandTotal(),
+                    ),
+                  ),
+                ],
               ),
-
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: TextFormField(
-                    controller: entry.unitLabelController,
-                    decoration: const InputDecoration(labelText: 'Unit*'),
-                    readOnly:
-                        entry.selectedUnit !=
-                        null, // Read-only if unit selected via dialog
-                    validator:
-                        (value) =>
-                            (value == null || value.isEmpty) ? 'Unit?' : null,
-                    onChanged: (_) => _calculateGrandTotal(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 1,
-                  child: TextFormField(
-                    controller: entry.quantityController,
-                    decoration: const InputDecoration(labelText: 'Qty*'),
-                    keyboardType: TextInputType.number,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) return 'Qty?';
-                      if (double.tryParse(value) == null ||
-                          double.parse(value) <= 0)
-                        return 'Invalid';
-                      return null;
-                    },
-                    onChanged: (_) => _calculateGrandTotal(),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: entry.priceAtTimeController,
-                    decoration: const InputDecoration(labelText: 'Price/Unit*'),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: entry.priceAtTimeController,
+                      decoration: const InputDecoration(
+                        labelText: 'Price/Unit',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      readOnly: true, // Price is set via selection
                     ),
-                    readOnly:
-                        entry.selectedUnit !=
-                        null, // Read-only if unit selected via dialog
-                    validator: (value) {
-                      if (value == null || value.isEmpty) return 'Price?';
-                      if (double.tryParse(value) == null ||
-                          double.parse(value) < 0)
-                        return 'Invalid';
-                      return null;
-                    },
-                    onChanged: (_) => _calculateGrandTotal(),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: 'Subtotal',
-                      border: InputBorder.none, // To look like text
-                    ),
-                    child: Text(
-                      NumberFormat.currency(
-                        locale: 'id_ID',
-                        symbol: 'Rp ',
-                        decimalDigits: 0,
-                      ).format(entry.itemSubtotal),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Subtotal',
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(vertical: 15),
+                      ),
+                      child: Text(
+                        NumberFormat.currency(
+                          locale: 'id_ID',
+                          symbol: 'Rp ',
+                          decimalDigits: 0,
+                        ).format(entry.itemSubtotal),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ] else if (entry.productId !=
+                null) // If product was selected but details are not fully loaded (e.g. editing)
+              const Text('Loading product details or unit not found...'),
           ],
         ),
       ),
@@ -512,9 +527,7 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                 backgroundColor: Colors.green,
               ),
             );
-            Navigator.of(
-              context,
-            ).pop(true); // Pop and return true to indicate success
+            Navigator.of(context).pop(true);
           } else if (state is DebtError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -526,65 +539,58 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
         },
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                // Customer Info (Display only)
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.person, color: Colors.blue),
-                    title: Text(
-                      widget.customer.name,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Text(
-                      widget.customer.phoneNumber ?? 'No phone number',
+          // Wrap the Form with SingleChildScrollView
+          child: SingleChildScrollView(
+            // <--- ADD THIS
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start, // Keep items aligned left
+                children: [
+                  // Customer Info (Display only)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    child: ListTile(
+                      leading: const Icon(Icons.person, color: Colors.blue),
+                      title: Text(
+                        widget.customer.name,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        widget.customer.phoneNumber ?? 'No phone number',
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
+                  // const SizedBox(height: 16), // Already handled by Card margin
 
-                // Debt Date
-                TextFormField(
-                  controller: _debtDateController,
-                  decoration: const InputDecoration(
-                    labelText: 'Debt Date*',
-                    hintText: 'Select date',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.calendar_today),
-                  ),
-                  readOnly: true,
-                  onTap: () => _selectDate(context, _debtDateController),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please select the debt date';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Items Section
-                Text('Items:', style: Theme.of(context).textTheme.titleMedium),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: _itemEntries.length,
-                    itemBuilder: (context, index) {
-                      return _buildItemEntryRow(index);
+                  // Debt Date
+                  TextFormField(
+                    controller: _debtDateController,
+                    decoration: const InputDecoration(
+                      labelText: 'Debt Date*',
+                      hintText: 'Select date',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.calendar_today),
+                    ),
+                    readOnly: true,
+                    onTap: () => _selectDate(context, _debtDateController),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please select the debt date';
+                      }
+                      return null;
                     },
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Row(
+                  const SizedBox(height: 20),
+
+                  // Items Section Header
+                  Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Grand Total: ${NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(_grandTotal)}',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                        'Items:',
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
                       TextButton.icon(
                         icon: const Icon(Icons.add_shopping_cart),
@@ -596,76 +602,124 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                       ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 8),
 
-                // Optional Fields
-                TextFormField(
-                  controller: _dueDateController,
-                  decoration: const InputDecoration(
-                    labelText: 'Due Date (Optional)',
-                    hintText: 'Select due date',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.event_busy),
-                  ),
-                  readOnly: true,
-                  onTap: () => _selectDate(context, _dueDateController),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _notesController,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes (Optional)',
-                    hintText: 'Any additional notes',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.notes),
-                  ),
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _amountPaidController,
-                  decoration: const InputDecoration(
-                    labelText: 'Amount Paid Initially (Optional)',
-                    hintText: 'Enter amount if any payment made now',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.payment),
-                  ),
-                  keyboardType: TextInputType.number,
-                  validator: (value) {
-                    if (value != null && value.isNotEmpty) {
-                      final val = double.tryParse(value);
-                      if (val == null || val < 0) return 'Invalid amount';
-                      if (val > _grandTotal) return 'Cannot exceed total';
-                    }
-                    return null;
-                  },
-                ),
+                  // Items List (This ListView.builder should NOT be wrapped in another Expanded here
+                  // because the outer SingleChildScrollView will handle the overall scrolling)
+                  if (_itemEntries.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16.0),
+                      child: Center(
+                        child: Text(
+                          'No items added yet. Click "Add Item".',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    )
+                  else
+                    ListView.builder(
+                      shrinkWrap:
+                          true, // Crucial for ListView inside SingleChildScrollView
+                      physics:
+                          const NeverScrollableScrollPhysics(), // Also crucial
+                      itemCount: _itemEntries.length,
+                      itemBuilder: (context, index) {
+                        return _buildItemEntryRow(
+                          index,
+                        ); // Your existing method
+                      },
+                    ),
 
-                const SizedBox(height: 24),
-                BlocBuilder<DebtBloc, DebtState>(
-                  builder: (context, state) {
-                    if (state is DebtLoading && !state.isFetchingMore) {
-                      // Only show for main operation loading
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    return ElevatedButton.icon(
-                      icon: Icon(_isEditing ? Icons.save_alt : Icons.add_task),
-                      onPressed: _submitForm,
-                      label: Text(
-                        _isEditing ? 'Update Debt' : 'Save Debt Record',
+                  const SizedBox(height: 8),
+                  // Grand Total (moved from the Row with Add Item for better layout)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Text(
+                        'Grand Total: ${NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(_grandTotal)}',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        textStyle: const TextStyle(fontSize: 16),
-                        minimumSize: const Size(
-                          double.infinity,
-                          50,
-                        ), // Full width
-                      ),
-                    );
-                  },
-                ),
-              ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Optional Fields
+                  TextFormField(
+                    controller: _dueDateController,
+                    decoration: const InputDecoration(
+                      labelText: 'Due Date (Optional)',
+                      hintText: 'Select due date',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.event_busy),
+                    ),
+                    readOnly: true,
+                    onTap: () => _selectDate(context, _dueDateController),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _notesController,
+                    decoration: const InputDecoration(
+                      labelText: 'Notes (Optional)',
+                      hintText: 'Any additional notes',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.notes),
+                    ),
+                    keyboardType: TextInputType.multiline, // Allow multiline
+                    minLines: 1, // Start with 1 line
+                    maxLines: 3, // Expand up to 3 lines
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _amountPaidController,
+                    decoration: const InputDecoration(
+                      labelText: 'Amount Paid Initially (Optional)',
+                      hintText: 'Enter amount if any payment made now',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.payment),
+                    ),
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value != null && value.isNotEmpty) {
+                        final val = double.tryParse(value);
+                        if (val == null || val < 0) return 'Invalid amount';
+                        // We can't validate against _grandTotal here easily if items can still be added/removed
+                        // The backend should ideally validate amountPaid <= totalAmount upon submission.
+                        // For now, let's remove the grand total check here to avoid complexity during form input.
+                        // if (val > _grandTotal) return 'Cannot exceed total';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Submit Button
+                  BlocBuilder<DebtBloc, DebtState>(
+                    builder: (context, state) {
+                      if (state is DebtLoading && !state.isFetchingMore) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      return ElevatedButton.icon(
+                        icon: Icon(
+                          _isEditing ? Icons.save_alt : Icons.add_task,
+                        ),
+                        onPressed: _submitForm,
+                        label: Text(
+                          _isEditing ? 'Update Debt' : 'Save Debt Record',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          textStyle: const TextStyle(fontSize: 16),
+                          minimumSize: const Size(double.infinity, 50),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 20), // Add some padding at the bottom
+                ],
+              ),
             ),
           ),
         ),

@@ -142,19 +142,24 @@ class DebtBloc extends Bloc<DebtEvent, DebtState> {
     UpdateDebtRecord event,
     Emitter<DebtState> emit,
   ) async {
-    emit(const DebtLoading());
+    // Optional: emit a specific "DebtUpdating" state if you want fine-grained loading for the button
+    // emit(DebtUpdating(debtId: event.debtId)); // You'd need to define this state
+
     try {
       final updatedDebtRecord = await debtService.updateDebtRecord(
         event.debtId,
         event.updateData,
       );
-      emit(
-        DebtOperationSuccess(
-          message: "Debt record updated successfully!",
-          debtRecord: updatedDebtRecord,
-        ),
-      );
-      // Optionally dispatch LoadDebts or LoadDebtById to refresh relevant data
+
+      if (updatedDebtRecord != null && updatedDebtRecord.id != null) {
+        // Directly emit DebtLoaded with the updated record.
+        // The UI will listen for this to update content AND to show a success message.
+        emit(DebtLoaded(updatedDebtRecord));
+      } else {
+        emit(
+          DebtError("Failed to retrieve updated debt details after payment."),
+        );
+      }
     } catch (e) {
       emit(DebtError("Failed to update debt record: ${e.toString()}"));
     }

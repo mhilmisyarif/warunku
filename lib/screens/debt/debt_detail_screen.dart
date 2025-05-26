@@ -47,89 +47,115 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
     final TextEditingController paymentController = TextEditingController();
     final GlobalKey<FormState> formKey = GlobalKey<FormState>();
     double remainingBalance = currentDebt.totalAmount - currentDebt.amountPaid;
+    bool _isProcessingPayment = false; // Local state for dialog's loading
 
     showDialog(
       context: context,
+      barrierDismissible:
+          !_isProcessingPayment, // Prevent dismissing while processing
       builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: const Text('Record Payment'),
-          content: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Total Debt: ${_formatCurrency(currentDebt.totalAmount)}'),
-                Text(
-                  'Already Paid: ${_formatCurrency(currentDebt.amountPaid)}',
+        // Use StatefulBuilder to manage _isProcessingPayment within the dialog
+        return StatefulBuilder(
+          builder: (stfContext, stfSetState) {
+            return AlertDialog(
+              title: const Text('Record Payment'),
+              content: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ... (Text widgets for debt info remain the same) ...
+                    Text(
+                      'Total Debt: ${_formatCurrency(currentDebt.totalAmount)}',
+                    ),
+                    Text(
+                      'Already Paid: ${_formatCurrency(currentDebt.amountPaid)}',
+                    ),
+                    Text(
+                      'Remaining Balance: ${_formatCurrency(remainingBalance)}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: paymentController,
+                      enabled:
+                          !_isProcessingPayment, // Disable while processing
+                      // ... (validator and decoration remain the same) ...
+                      validator: (value) {
+                        // Ensure validator uses remainingBalance from dialog scope
+                        if (value == null || value.isEmpty)
+                          return 'Please enter an amount';
+                        final amount = double.tryParse(value);
+                        if (amount == null) return 'Invalid number';
+                        if (amount <= 0) return 'Payment must be positive';
+                        if (amount > remainingBalance)
+                          return 'Payment exceeds remaining balance';
+                        return null;
+                      },
+                    ),
+                  ],
                 ),
-                Text(
-                  'Remaining Balance: ${_formatCurrency(remainingBalance)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('Cancel'),
+                  onPressed:
+                      _isProcessingPayment
+                          ? null
+                          : () {
+                            // Disable while processing
+                            Navigator.of(dialogContext).pop();
+                          },
                 ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: paymentController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: 'New Payment Amount',
-                    hintText: 'Enter amount',
-                    prefixText: 'Rp ',
-                    border: const OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter an amount';
-                    }
-                    final amount = double.tryParse(value);
-                    if (amount == null) {
-                      return 'Invalid number';
-                    }
-                    if (amount <= 0) {
-                      return 'Payment must be positive';
-                    }
-                    if (amount > remainingBalance) {
-                      return 'Payment exceeds remaining balance';
-                    }
-                    return null;
-                  },
+                ElevatedButton(
+                  child:
+                      _isProcessingPayment
+                          ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                          : const Text('Record Payment'),
+                  onPressed:
+                      _isProcessingPayment
+                          ? null
+                          : () {
+                            // Disable while processing
+                            if (formKey.currentState!.validate()) {
+                              stfSetState(() {
+                                _isProcessingPayment =
+                                    true; // Show loading in button
+                              });
+
+                              final double paymentAmount = double.parse(
+                                paymentController.text,
+                              );
+                              final double newTotalPaid =
+                                  currentDebt.amountPaid + paymentAmount;
+                              Map<String, dynamic> updateData = {
+                                'amountPaid': newTotalPaid,
+                              };
+
+                              // Access BLoC using the screen's context, not dialogContext
+                              BlocProvider.of<DebtBloc>(context).add(
+                                UpdateDebtRecord(currentDebt.id!, updateData),
+                              );
+
+                              // The BlocListener on DebtDetailScreen will handle SnackBar and closing dialog
+                              // Or, you can pop here IF AND ONLY IF BLoC operations are quick and success is assumed.
+                              // It's better to let the BlocListener handle popping after success.
+                              // For now, we pop immediately and rely on BlocListener in main screen.
+                              Navigator.of(dialogContext).pop();
+                            }
+                          },
                 ),
               ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Cancel'),
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
-            ),
-            ElevatedButton(
-              child: const Text('Record Payment'),
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  final double paymentAmount = double.parse(
-                    paymentController.text,
-                  );
-                  final double newTotalPaid =
-                      currentDebt.amountPaid + paymentAmount;
-
-                  Map<String, dynamic> updateData = {
-                    'amountPaid': newTotalPaid,
-                    // The backend pre-save hook should update the status based on the new amountPaid
-                  };
-
-                  // Dispatch update event
-                  context.read<DebtBloc>().add(
-                    UpdateDebtRecord(currentDebt.id!, updateData),
-                  );
-                  Navigator.of(dialogContext).pop(); // Close dialog
-                }
-              },
-            ),
-          ],
+            );
+          },
         );
       },
     );
@@ -140,17 +166,43 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Debt Details')),
       body: BlocConsumer<DebtBloc, DebtState>(
+        listenWhen: (previous, current) {
+          // Only listen if the current state is relevant for a side-effect (SnackBar)
+          // and if it's for the current debt.
+          if (current is DebtLoaded &&
+              current.debtRecord.id == widget.debtId &&
+              previous is DebtLoading) {
+            // This condition means data just loaded, possibly after an update that went through a loading phase.
+            // Or, if update doesn't have its own loading state, this is after initial load.
+            // We need a better way to know if it was due to an update.
+            // For now, let's assume ANY DebtLoaded for this ID after an action is "success".
+            // This might show the snackbar on initial load too, which might be okay or not.
+            return true;
+          }
+          if (current is DebtError) return true;
+          return false; // Default don't listen
+        },
         listener: (context, state) {
-          if (state is DebtOperationSuccess &&
-              state.debtRecord?.id == widget.debtId) {
-            // If the updated/successful operation was for THIS debt, refresh its details
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(state.message),
-                backgroundColor: Colors.green,
-              ),
-            );
-            // The BlocBuilder will rebuild with the new state.debtRecord
+          print("DebtDetailScreen LISTENER: state=$state"); // DEBUG
+          if (state is DebtLoaded && state.debtRecord.id == widget.debtId) {
+            // To differentiate initial load vs. update success:
+            // This is tricky without a dedicated "OperationSuccess" state.
+            // Let's assume for now we show it if data is loaded.
+            // A better way: the payment dialog could set a flag that this listener checks.
+            // For simplicity now:
+            // ScaffoldMessenger.of(context).removeCurrentSnackBar(); // Remove any previous
+            // ScaffoldMessenger.of(context).showSnackBar(
+            //   const SnackBar(content: Text("Debt details updated!"), backgroundColor: Colors.blue),
+            // );
+            // The above would show on every load. We only want it after payment.
+            // We'll rely on the dialog closing as the primary feedback for payment submission success for now,
+            // and the UI just updating. If you need a specific "Payment Successful" SnackBar,
+            // keeping DebtOperationSuccess or a similar dedicated event/state is cleaner.
+
+            // Let's revert to keeping DebtOperationSuccess for clearer SnackBar logic
+            // and focus on why the builder isn't picking up DebtLoaded correctly after it.
+            // The BLoC emitting DebtLoaded then DebtOperationSuccess (from turn 64) was a good pattern.
+            // The problem is likely still in buildWhen or builder logic.
           } else if (state is DebtError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -160,172 +212,188 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
             );
           }
         },
-        // buildWhen: (previous, current) {
-        //   // Only rebuild if the relevant debt data has changed or loading states
-        //   if (current is DebtLoaded && current.debtRecord.id == widget.debtId) return true;
-        //   if (current is DebtLoading || current is DebtInitial || current is DebtError) return true;
-        //   if (current is DebtOperationSuccess && current.debtRecord?.id == widget.debtId) return true; // Rebuild on success for this debt
-        //   return false;
-        // },
-        builder: (context, state) {
-          if (state is DebtLoading && (state is! DebtLoaded)) {
-            // Show loading if not already showing loaded data
-            final S =
-                context
-                    .read<DebtBloc>()
-                    .state; // check if current data is available
-            if (S is DebtLoaded && S.debtRecord.id == widget.debtId) {
-              // Keep showing old data while new is loading from an update.
-            } else {
-              return const Center(child: CircularProgressIndicator());
-            }
+        buildWhen: (previous, current) {
+          print(
+            "DebtDetailScreen buildWhen: previous=$previous, current=$current",
+          );
+          if (current is DebtOperationSuccess) {
+            // This was from my previous suggestion for DebtBloc emissions
+            print(
+              "DebtDetailScreen buildWhen: Is DebtOperationSuccess, returning FALSE",
+            );
+            return false;
           }
+          if (current is DebtLoaded) {
+            bool isRelevant = current.debtRecord.id == widget.debtId;
+            bool hasDataChanged = true;
+            if (previous is DebtLoaded &&
+                previous.debtRecord.id == current.debtRecord.id) {
+              hasDataChanged = previous.debtRecord != current.debtRecord;
+            }
+            bool should = isRelevant && hasDataChanged;
+            print(
+              "DebtDetailScreen buildWhen: Is DebtLoaded (singular), relevant=$isRelevant, dataChanged=$hasDataChanged, returning $should",
+            );
+            return should;
+          }
+          bool should =
+              current is DebtInitial ||
+              current is DebtLoading ||
+              current is DebtError;
+          print(
+            "DebtDetailScreen buildWhen: Is $current (other type), returning $should",
+          );
+          return should;
+        },
+        builder: (context, state) {
+          print(
+            "DebtDetailScreen BUILDER: state=$state, for debtId=${widget.debtId}",
+          );
 
           if (state is DebtLoaded && state.debtRecord.id == widget.debtId) {
             final debt = state.debtRecord;
             final remainingBalance = debt.totalAmount - debt.amountPaid;
-
-            return RefreshIndicator(
-              onRefresh: () async {
-                context.read<DebtBloc>().add(LoadDebtById(widget.debtId));
-              },
-              child: ListView(
-                padding: const EdgeInsets.all(16.0),
-                children: <Widget>[
-                  _buildDetailCard(
-                    title: 'Customer Information',
-                    children: [
-                      _buildDetailRow(
-                        'Name:',
-                        debt.customerName,
-                      ), // Uses the customerName getter
-                      if (debt.customer
-                          is Customer) // Check if customer is populated
-                        _buildDetailRow(
-                          'Phone:',
-                          (debt.customer as Customer).phoneNumber ?? 'N/A',
-                        ),
-                      if (debt.customer is Customer)
-                        _buildDetailRow(
-                          'Address:',
-                          (debt.customer as Customer).address ?? 'N/A',
-                        ),
-                      if (debt.customer is String) // If only ID is stored
-                        _buildDetailRow(
-                          'Customer ID:',
-                          debt.customer as String,
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildDetailCard(
-                    title: 'Debt Summary',
-                    children: [
-                      _buildDetailRow(
-                        'Debt Date:',
-                        DateFormat.yMMMMd().format(debt.debtDate),
+            print(
+              "DebtDetailScreen BUILDER: Displaying DebtLoaded for ${debt.id}",
+            );
+            return Hero(
+              tag: 'debt_hero_${widget.debtId}',
+              child: Material(
+                type: MaterialType.transparency,
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    context.read<DebtBloc>().add(LoadDebtById(widget.debtId));
+                  },
+                  child: ListView(
+                    padding: const EdgeInsets.all(16.0),
+                    children: <Widget>[
+                      _buildDetailCard(
+                        title: 'Customer Information',
+                        children: [
+                          _buildDetailRow('Name:', debt.customerName),
+                          if (debt.customer is Customer)
+                            _buildDetailRow(
+                              'Phone:',
+                              (debt.customer as Customer).phoneNumber ?? 'N/A',
+                            ),
+                          if (debt.customer is Customer)
+                            _buildDetailRow(
+                              'Address:',
+                              (debt.customer as Customer).address ?? 'N/A',
+                            ),
+                          if (debt.customer is String)
+                            _buildDetailRow(
+                              'Customer ID:',
+                              debt.customer as String,
+                            ),
+                        ],
                       ),
-                      if (debt.dueDate != null)
-                        _buildDetailRow(
-                          'Due Date:',
-                          DateFormat.yMMMMd().format(debt.dueDate!),
-                        ),
-                      _buildDetailRow(
-                        'Status:',
-                        debt.status,
-                        valueColor: _getStatusColor(debt.status),
-                        valueStyle: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      _buildDetailRow(
-                        'Total Amount:',
-                        _formatCurrency(debt.totalAmount),
-                      ),
-                      _buildDetailRow(
-                        'Amount Paid:',
-                        _formatCurrency(debt.amountPaid),
-                      ),
-                      _buildDetailRow(
-                        'Remaining Balance:',
-                        _formatCurrency(remainingBalance),
-                        valueStyle: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color:
-                              remainingBalance > 0
-                                  ? Colors.redAccent
-                                  : Colors.green,
-                        ),
-                      ),
-                      if (debt.notes != null && debt.notes!.isNotEmpty)
-                        _buildDetailRow('Notes:', debt.notes!),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Items (${debt.items.length})',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  ...debt.items
-                      .map(
-                        (item) => Card(
-                          elevation: 1,
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item.productName,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${item.quantity} x ${item.unitLabel} @ ${_formatCurrency(item.priceAtTimeOfDebt)}',
-                                ),
-                                const SizedBox(height: 4),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: Text(
-                                    _formatCurrency(item.totalPrice),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                      const SizedBox(height: 16),
+                      _buildDetailCard(
+                        title: 'Debt Summary',
+                        children: [
+                          _buildDetailRow(
+                            'Debt Date:',
+                            DateFormat.yMMMMd().format(debt.debtDate),
+                          ),
+                          if (debt.dueDate != null)
+                            _buildDetailRow(
+                              'Due Date:',
+                              DateFormat.yMMMMd().format(debt.dueDate!),
+                            ),
+                          _buildDetailRow(
+                            'Status:',
+                            debt.status,
+                            valueColor: _getStatusColor(debt.status),
+                            valueStyle: const TextStyle(
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                        ),
-                      )
-                      .toList(),
-                  const SizedBox(height: 24),
-                  if (debt.status != 'PAID')
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.payment),
-                      label: const Text('Record Payment'),
-                      onPressed: () => _showRecordPaymentDialog(context, debt),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                          _buildDetailRow(
+                            'Total Amount:',
+                            _formatCurrency(debt.totalAmount),
+                          ),
+                          _buildDetailRow(
+                            'Amount Paid:',
+                            _formatCurrency(debt.amountPaid),
+                          ),
+                          _buildDetailRow(
+                            'Remaining Balance:',
+                            _formatCurrency(remainingBalance),
+                            valueStyle: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color:
+                                  remainingBalance > 0
+                                      ? Colors.redAccent
+                                      : Colors.green,
+                            ),
+                          ),
+                          if (debt.notes != null && debt.notes!.isNotEmpty)
+                            _buildDetailRow('Notes:', debt.notes!),
+                        ],
                       ),
-                    ),
-                  const SizedBox(height: 10),
-                  // Placeholder for Edit Debt (could navigate back to DebtRecordFormScreen in edit mode)
-                  // if (debt.status != 'PAID') // Usually cannot edit items if already paid
-                  //   OutlinedButton.icon(
-                  //     icon: const Icon(Icons.edit_note),
-                  //     label: const Text('Edit Debt Items/Notes'),
-                  //     onPressed: () { /* Navigate to DebtRecordFormScreen in edit mode */ },
-                  //   ),
-                ],
+                      const SizedBox(height: 16),
+                      Text(
+                        'Items (${debt.items.length})',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      ...debt.items
+                          .map(
+                            (item) => Card(
+                              elevation: 1,
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item.productName,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${item.quantity} x ${item.unitLabel} @ ${_formatCurrency(item.priceAtTimeOfDebt)}',
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: Text(
+                                        _formatCurrency(item.totalPrice),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      const SizedBox(height: 24),
+                      if (debt.status != 'PAID')
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.payment),
+                          label: const Text('Record Payment'),
+                          onPressed:
+                              () => _showRecordPaymentDialog(context, debt),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      const SizedBox(height: 10),
+                    ],
+                  ),
+                ),
               ),
             );
           } else if (state is DebtError) {
+            print("DebtDetailScreen BUILDER: Displaying DebtError"); // DEBUG
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -341,9 +409,12 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
                 ],
               ),
             );
+          } else {
+            // This covers DebtInitial, DebtLoading, or any other state
+            // that passed buildWhen but isn't DebtLoaded for the correct ID or DebtError.
+            // It should primarily show for the initial loading of this screen.
+            return const Center(child: CircularProgressIndicator());
           }
-          // Fallback or if the state is for a different debt ID
-          return const Center(child: Text('Loading debt details...'));
         },
       ),
     );

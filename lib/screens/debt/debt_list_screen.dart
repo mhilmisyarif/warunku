@@ -358,43 +358,49 @@ class _DebtListScreenState extends State<DebtListScreen> {
                             );
                       }
                       final debt = _displayedDebts[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 5,
-                        ),
-                        child: ListTile(
-                          title: Text(
-                            'Debt ID: ${debt.id?.substring(0, 8) ?? 'N/A'}...',
-                          ), // Show partial ID
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Customer: ${debt.customerName} (${debt.customerId.substring(0, 6)}...)',
-                              ), // Requires customerName to be populated or fetched
-                              Text(
-                                'Date: ${DateFormat.yMMMd().format(debt.debtDate)}',
-                              ),
-                              Text(
-                                'Total: ${_formatCurrency(debt.totalAmount)}',
-                              ),
-                              Text('Paid: ${_formatCurrency(debt.amountPaid)}'),
-                              Text(
-                                'Status: ${debt.status}',
-                                style: TextStyle(
-                                  color: _getStatusColor(debt.status),
-                                  fontWeight: FontWeight.bold,
+                      return Hero(
+                        tag: 'debt_hero_${debt.id}',
+
+                        child: Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 5,
+                          ),
+                          child: ListTile(
+                            title: Text(
+                              'Debt ID: ${debt.id?.substring(0, 8) ?? 'N/A'}...',
+                            ), // Show partial ID
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Customer: ${debt.customerName} (${debt.customerId.substring(0, 6)}...)',
+                                ), // Requires customerName to be populated or fetched
+                                Text(
+                                  'Date: ${DateFormat.yMMMd().format(debt.debtDate)}',
                                 ),
-                              ),
-                            ],
+                                Text(
+                                  'Total: ${_formatCurrency(debt.totalAmount)}',
+                                ),
+                                Text(
+                                  'Paid: ${_formatCurrency(debt.amountPaid)}',
+                                ),
+                                Text(
+                                  'Status: ${debt.status}',
+                                  style: TextStyle(
+                                    color: _getStatusColor(debt.status),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            isThreeLine: true, // Adjust if content overflows
+                            trailing: const Icon(
+                              Icons.arrow_forward_ios,
+                              size: 16,
+                            ),
+                            onTap: () => _navigateToDebtDetails(debt),
                           ),
-                          isThreeLine: true, // Adjust if content overflows
-                          trailing: const Icon(
-                            Icons.arrow_forward_ios,
-                            size: 16,
-                          ),
-                          onTap: () => _navigateToDebtDetails(debt),
                         ),
                       );
                     },
