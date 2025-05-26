@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart'; // For date formatting
-import 'package:warunku/screens/debt/debt_record_form_screen.dart';
 import '../customer/customer_list_screen.dart'; // For navigating to select a customer
 import '../../blocs/debt/debt_bloc.dart';
 import '../../models/debt_record.dart';
@@ -11,7 +10,7 @@ import '../../models/customer.dart'; // To potentially display customer name if 
 // import '../../widgets/search_bar.dart'; // We might need a more complex filter UI here
 // Placeholder for navigation
 import 'debt_record_form_screen.dart';
-// import 'debt_detail_screen.dart';
+import 'debt_detail_screen.dart';
 
 class DebtListScreen extends StatefulWidget {
   final Customer?
@@ -31,8 +30,8 @@ class _DebtListScreenState extends State<DebtListScreen> {
   int _currentPage = 1; // Keep track of the current page for displayed data
 
   // TODO: Implement date range filter UI and state
-  DateTime? _startDateFilter;
-  DateTime? _endDateFilter;
+  // DateTime? _startDateFilter;
+  // DateTime? _endDateFilter;
 
   @override
   void initState() {
@@ -161,19 +160,12 @@ class _DebtListScreenState extends State<DebtListScreen> {
 
   void _navigateToDebtDetails(DebtRecord debt) {
     // Placeholder for actual navigation
-    // Navigator.push(
-    //   context,
-    //   MaterialPageRoute(
-    //     builder: (context) => DebtDetailScreen(debtId: debt.id!), // Pass ID
-    //   ),
-    // ).then((_) => _loadDebts(refresh: true)); // Refresh after returning
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'View details for debt ID: ${debt.id} (to be implemented)',
-        ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DebtDetailScreen(debtId: debt.id!), // Pass ID
       ),
-    );
+    ).then((_) => _loadDebts(refresh: true)); // Refresh after returning
   }
 
   Widget _buildFilterChips() {
