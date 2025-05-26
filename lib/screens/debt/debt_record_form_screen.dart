@@ -334,7 +334,8 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
         _dueDateController.text.isNotEmpty
             ? DateFormat('yyyy-MM-dd').tryParse(_dueDateController.text)
             : null;
-    final amountPaid = double.tryParse(_amountPaidController.text) ?? 0.0;
+    final initialAmountPaid =
+        double.tryParse(_amountPaidController.text) ?? 0.0;
 
     // Recalculate grand total one last time from finalItems for submission
     final double finalGrandTotal = finalItems.fold(
@@ -342,7 +343,7 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
       (sum, item) => sum + item.totalPrice,
     );
 
-    if (amountPaid > finalGrandTotal && finalGrandTotal > 0) {
+    if (initialAmountPaid > finalGrandTotal && finalGrandTotal > 0) {
       // allow paying 0 for 0 total
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -353,14 +354,38 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
       return;
     }
 
+    List<PaymentEntry> initialPaymentHistory = [];
+    if (initialAmountPaid > 0) {
+      initialPaymentHistory.add(
+        PaymentEntry(
+          amount: initialAmountPaid,
+          paymentDate:
+              debtDate, // Or DateTime.now() if payment is considered "now"
+          method:
+              "Initial Payment", // Or leave null/empty, or add a field for this
+        ),
+      );
+    }
+
     final debtRecordPayload = DebtRecord(
       id: widget.debtRecordToEdit?.id, // For updates
       customer: widget.customer.id!,
       items: finalItems,
       totalAmount: finalGrandTotal, // Send the calculated final total
-      amountPaid: amountPaid,
+      amountPaid: initialAmountPaid,
+      paymentHistory:
+          _isEditing
+              ? (widget.debtRecordToEdit?.paymentHistory ??
+                  []) // Preserve existing history if editing
+              : initialPaymentHistory, // Use initial payment history for new records
       status:
-          'UNPAID', // Backend will derive this based on amountPaid and totalAmount
+          _isEditing
+              ? widget
+                  .debtRecordToEdit!
+                  .status // Preserve existing status for edit (backend will re-evaluate)
+              : (initialAmountPaid >= finalGrandTotal && finalGrandTotal > 0
+                  ? 'PAID'
+                  : (initialAmountPaid > 0 ? 'PARTIALLY_PAID' : 'UNPAID')),
       debtDate: debtDate,
       dueDate: dueDate,
       notes: _notesController.text.trim(),

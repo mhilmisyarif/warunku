@@ -49,6 +49,48 @@ class DebtItem {
   }
 }
 
+class PaymentEntry {
+  final String? id; // Optional: if your backend sends _id for sub-documents
+  final double amount;
+  final DateTime paymentDate;
+  final String? method;
+  final String? notes;
+  final DateTime? recordedAt; // From backend's paymentEntrySchema timestamps
+
+  PaymentEntry({
+    this.id,
+    required this.amount,
+    required this.paymentDate,
+    this.method,
+    this.notes,
+    this.recordedAt,
+  });
+
+  factory PaymentEntry.fromJson(Map<String, dynamic> json) {
+    return PaymentEntry(
+      id: json['_id'] as String?,
+      amount: (json['amount'] as num).toDouble(),
+      paymentDate: DateTime.parse(json['paymentDate'] as String),
+      method: json['method'] as String?,
+      notes: json['notes'] as String?,
+      recordedAt:
+          json['recordedAt'] != null
+              ? DateTime.parse(json['recordedAt'] as String)
+              : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    // Primarily for sending a new payment to the backend
+    return {
+      'amount': amount,
+      'paymentDate': paymentDate.toIso8601String(),
+      if (method != null) 'method': method,
+      if (notes != null) 'notes': notes,
+    };
+  }
+}
+
 class DebtRecord {
   final String? id;
   final dynamic customer; // Can be Customer object or just customerId String
@@ -56,6 +98,7 @@ class DebtRecord {
   final double totalAmount;
   final double amountPaid;
   final String status; // 'UNPAID', 'PARTIALLY_PAID', 'PAID'
+  final List<PaymentEntry> paymentHistory;
   final DateTime debtDate;
   final DateTime? dueDate;
   final String? notes;
@@ -68,6 +111,7 @@ class DebtRecord {
     required this.items,
     required this.totalAmount,
     this.amountPaid = 0.0,
+    required this.paymentHistory,
     required this.status,
     required this.debtDate,
     this.dueDate,
@@ -106,18 +150,12 @@ class DebtRecord {
     dynamic customerData = json['customer'];
     Customer? parsedCustomer;
     if (customerData is Map<String, dynamic>) {
-      // If customer is populated and is an object
       parsedCustomer = Customer.fromJson(customerData);
-    } else if (customerData is String) {
-      // If customer is just an ID (string), store it as is.
-      // The UI layer or BLoC might decide to fetch full customer details later.
-      // For now, we make the 'customer' field dynamic in the model.
     }
 
     return DebtRecord(
       id: json['_id'] as String?,
-      customer:
-          parsedCustomer ?? customerData, // Store parsed object or ID string
+      customer: parsedCustomer ?? customerData,
       items:
           (json['items'] as List<dynamic>)
               .map(
@@ -127,6 +165,14 @@ class DebtRecord {
               .toList(),
       totalAmount: (json['totalAmount'] as num).toDouble(),
       amountPaid: (json['amountPaid'] as num?)?.toDouble() ?? 0.0,
+      // Parse the paymentHistory list
+      paymentHistory:
+          (json['paymentHistory'] as List<dynamic>? ?? []) // Handle if null
+              .map(
+                (entryJson) =>
+                    PaymentEntry.fromJson(entryJson as Map<String, dynamic>),
+              )
+              .toList(),
       status: json['status'] as String,
       debtDate: DateTime.parse(json['debtDate'] as String),
       dueDate:
@@ -145,17 +191,27 @@ class DebtRecord {
     );
   }
 
+  // toJson remains largely the same for creating a new debt,
+  // as paymentHistory is typically not sent on initial creation,
+  // or would be an empty array.
+  // For updates, the service layer will construct the specific payload.
   Map<String, dynamic> toJson() {
     return {
       if (id != null) '_id': id,
-      'customer': customerId, // Send only customer ID
+      'customer': customerId,
       'items': items.map((item) => item.toJson()).toList(),
       // totalAmount is calculated by backend
-      'amountPaid': amountPaid,
-      'status': status, // Status might be set by backend based on payment
+      // amountPaid is calculated by backend from paymentHistory
+      // initial status is set by backend
       'debtDate': debtDate.toIso8601String(),
       if (dueDate != null) 'dueDate': dueDate!.toIso8601String(),
       if (notes != null) 'notes': notes,
+      // Send initial amountPaid as a payment entry if it exists and it's a new debt.
+      // This part of toJson might only be relevant for initial creation IF you allow an initial payment.
+      // Otherwise, paymentHistory is managed via updates.
+      // For simplicity, let's assume initial amountPaid is 0 and payments are added later.
+      // If you want to support an initial payment during creation:
+      // 'paymentHistory': amountPaid > 0 ? [PaymentEntry(amount: amountPaid, paymentDate: debtDate).toJson()] : [],
     };
   }
 }

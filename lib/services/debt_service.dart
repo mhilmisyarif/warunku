@@ -95,10 +95,15 @@ class DebtService {
   // For updating debt, especially payments or status
   Future<DebtRecord> updateDebtRecord(
     String id,
-    Map<String, dynamic> updateData,
+    Map<String, dynamic>
+    updateData, // This map should now contain the newPayment object
   ) async {
-    // updateData could be {'amountPaid': newAmount, 'status': 'PARTIALLY_PAID'}
     try {
+      // Example: updateData might be:
+      // {
+      //  'newPayment': { 'amount': 100.0, 'paymentDate': '2024-05-26T10:00:00Z', 'method': 'Cash' },
+      //  'notes': 'Updated notes for the debt' // Optional other fields
+      // }
       final response = await http.put(
         Uri.parse('$_debtsUrl/$id'),
         headers: {'Content-Type': 'application/json; charset=UTF-8'},

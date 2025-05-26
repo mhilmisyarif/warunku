@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart'; // For date and currency formatting
+import 'package:warunku/utils/formatter.dart';
 import '../../blocs/debt/debt_bloc.dart';
 import '../../models/debt_record.dart';
 import '../../models/customer.dart'; // For Customer type hint
@@ -22,14 +23,6 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
     context.read<DebtBloc>().add(LoadDebtById(widget.debtId));
   }
 
-  String _formatCurrency(double amount) {
-    return NumberFormat.currency(
-      locale: 'id_ID',
-      symbol: 'Rp ',
-      decimalDigits: 0,
-    ).format(amount);
-  }
-
   Color _getStatusColor(String status) {
     switch (status.toUpperCase()) {
       case 'UNPAID':
@@ -44,7 +37,13 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
   }
 
   void _showRecordPaymentDialog(BuildContext context, DebtRecord currentDebt) {
-    final TextEditingController paymentController = TextEditingController();
+    final TextEditingController paymentAmountController =
+        TextEditingController();
+    final TextEditingController paymentMethodController =
+        TextEditingController(); // Optional
+    final TextEditingController paymentNotesController =
+        TextEditingController();
+    // Payment date will default to now, or you can add a DatePicker
     final GlobalKey<FormState> formKey = GlobalKey<FormState>();
     double remainingBalance = currentDebt.totalAmount - currentDebt.amountPaid;
     bool _isProcessingPayment = false; // Local state for dialog's loading
@@ -61,97 +60,118 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
               title: const Text('Record Payment'),
               content: Form(
                 key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ... (Text widgets for debt info remain the same) ...
-                    Text(
-                      'Total Debt: ${_formatCurrency(currentDebt.totalAmount)}',
+                child: Container(
+                  width: double.maxFinite,
+
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ... (Text widgets for debt info remain the same) ...
+                        Text(
+                          'Total Debt: ${CurrencyFormatter.format(currentDebt.totalAmount)}',
+                        ),
+                        Text(
+                          'Already Paid: ${CurrencyFormatter.format(currentDebt.amountPaid)}',
+                        ),
+                        Text(
+                          'Remaining Balance: ${CurrencyFormatter.format(remainingBalance)}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: paymentAmountController,
+                          decoration: const InputDecoration(
+                            labelText: 'Payment Amount*',
+                            prefixText: 'Rp ',
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: TextInputType.number,
+                          enabled:
+                              !_isProcessingPayment, // Disable while processing
+                          // ... (validator and decoration remain the same) ...
+                          validator: (value) {
+                            // Ensure validator uses remainingBalance from dialog scope
+                            if (value == null || value.isEmpty)
+                              return 'Please enter an amount';
+                            final amount = double.tryParse(value);
+                            if (amount == null) return 'Invalid number';
+                            if (amount <= 0) return 'Payment must be positive';
+                            if (amount > remainingBalance)
+                              return 'Payment exceeds remaining balance';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: paymentMethodController,
+                          decoration: const InputDecoration(
+                            labelText: 'Payment Method (Optional)',
+                            hintText: 'e.g., Cash, Transfer',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: paymentNotesController,
+                          decoration: const InputDecoration(
+                            labelText: 'Payment Notes (Optional)',
+                            border: OutlineInputBorder(),
+                          ),
+                          maxLines: 2,
+                        ),
+                      ],
                     ),
-                    Text(
-                      'Already Paid: ${_formatCurrency(currentDebt.amountPaid)}',
-                    ),
-                    Text(
-                      'Remaining Balance: ${_formatCurrency(remainingBalance)}',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: paymentController,
-                      enabled:
-                          !_isProcessingPayment, // Disable while processing
-                      // ... (validator and decoration remain the same) ...
-                      validator: (value) {
-                        // Ensure validator uses remainingBalance from dialog scope
-                        if (value == null || value.isEmpty)
-                          return 'Please enter an amount';
-                        final amount = double.tryParse(value);
-                        if (amount == null) return 'Invalid number';
-                        if (amount <= 0) return 'Payment must be positive';
-                        if (amount > remainingBalance)
-                          return 'Payment exceeds remaining balance';
-                        return null;
-                      },
-                    ),
-                  ],
+                  ),
                 ),
               ),
               actions: <Widget>[
                 TextButton(
                   child: const Text('Cancel'),
-                  onPressed:
-                      _isProcessingPayment
-                          ? null
-                          : () {
-                            // Disable while processing
-                            Navigator.of(dialogContext).pop();
-                          },
+                  onPressed: () {
+                    // Disable while processing
+                    Navigator.of(dialogContext).pop();
+                  },
                 ),
                 ElevatedButton(
-                  child:
-                      _isProcessingPayment
-                          ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                          : const Text('Record Payment'),
-                  onPressed:
-                      _isProcessingPayment
-                          ? null
-                          : () {
-                            // Disable while processing
-                            if (formKey.currentState!.validate()) {
-                              stfSetState(() {
-                                _isProcessingPayment =
-                                    true; // Show loading in button
-                              });
+                  child: const Text('Record Payment'),
+                  onPressed: () {
+                    // Disable while processing
+                    if (formKey.currentState!.validate()) {
+                      final newPaymentEntry = PaymentEntry(
+                        amount: double.parse(paymentAmountController.text),
+                        paymentDate: DateTime.now(), // Or use a date picker
+                        method:
+                            paymentMethodController.text.trim().isNotEmpty
+                                ? paymentMethodController.text.trim()
+                                : null,
+                        notes:
+                            paymentNotesController.text.trim().isNotEmpty
+                                ? paymentNotesController.text.trim()
+                                : null,
+                      );
 
-                              final double paymentAmount = double.parse(
-                                paymentController.text,
-                              );
-                              final double newTotalPaid =
-                                  currentDebt.amountPaid + paymentAmount;
-                              Map<String, dynamic> updateData = {
-                                'amountPaid': newTotalPaid,
-                              };
+                      // Construct the updateData for the service
+                      // This structure depends on how your backend controller expects 'newPayment'
+                      Map<String, dynamic> updatePayload = {
+                        'newPayment': newPaymentEntry.toJson(),
+                        // You can also send other fields to update on the DebtRecord itself, like general notes if needed
+                        // 'notes': 'General debt notes if changed',
+                      };
 
-                              // Access BLoC using the screen's context, not dialogContext
-                              BlocProvider.of<DebtBloc>(context).add(
-                                UpdateDebtRecord(currentDebt.id!, updateData),
-                              );
+                      // Access BLoC using the screen's context, not dialogContext
+                      BlocProvider.of<DebtBloc>(
+                        context,
+                      ).add(UpdateDebtRecord(currentDebt.id!, updatePayload));
 
-                              // The BlocListener on DebtDetailScreen will handle SnackBar and closing dialog
-                              // Or, you can pop here IF AND ONLY IF BLoC operations are quick and success is assumed.
-                              // It's better to let the BlocListener handle popping after success.
-                              // For now, we pop immediately and rely on BlocListener in main screen.
-                              Navigator.of(dialogContext).pop();
-                            }
-                          },
+                      // The BlocListener on DebtDetailScreen will handle SnackBar and closing dialog
+                      // Or, you can pop here IF AND ONLY IF BLoC operations are quick and success is assumed.
+                      // It's better to let the BlocListener handle popping after success.
+                      // For now, we pop immediately and rely on BlocListener in main screen.
+                      Navigator.of(dialogContext).pop();
+                    }
+                  },
                 ),
               ],
             );
@@ -203,6 +223,15 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
             // and focus on why the builder isn't picking up DebtLoaded correctly after it.
             // The BLoC emitting DebtLoaded then DebtOperationSuccess (from turn 64) was a good pattern.
             // The problem is likely still in buildWhen or builder logic.
+            ScaffoldMessenger.of(
+              context,
+            ).removeCurrentSnackBar(); // Remove previous
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Payment recorded. Debt details updated!"),
+                backgroundColor: Colors.green,
+              ),
+            );
           } else if (state is DebtError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -311,15 +340,15 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
                           ),
                           _buildDetailRow(
                             'Total Amount:',
-                            _formatCurrency(debt.totalAmount),
+                            CurrencyFormatter.format(debt.totalAmount),
                           ),
                           _buildDetailRow(
                             'Amount Paid:',
-                            _formatCurrency(debt.amountPaid),
+                            CurrencyFormatter.format(debt.amountPaid),
                           ),
                           _buildDetailRow(
                             'Remaining Balance:',
-                            _formatCurrency(remainingBalance),
+                            CurrencyFormatter.format(remainingBalance),
                             valueStyle: TextStyle(
                               fontWeight: FontWeight.bold,
                               color:
@@ -357,13 +386,15 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      '${item.quantity} x ${item.unitLabel} @ ${_formatCurrency(item.priceAtTimeOfDebt)}',
+                                      '${item.quantity} x ${item.unitLabel} @ ${CurrencyFormatter.format(item.priceAtTimeOfDebt)}',
                                     ),
                                     const SizedBox(height: 4),
                                     Align(
                                       alignment: Alignment.centerRight,
                                       child: Text(
-                                        _formatCurrency(item.totalPrice),
+                                        CurrencyFormatter.format(
+                                          item.totalPrice,
+                                        ),
                                         style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -376,6 +407,55 @@ class _DebtDetailScreenState extends State<DebtDetailScreen> {
                           )
                           .toList(),
                       const SizedBox(height: 24),
+                      if (debt.paymentHistory.isNotEmpty) ...[
+                        Text(
+                          'Payment History',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: debt.paymentHistory.length,
+                          itemBuilder: (context, index) {
+                            final payment = debt.paymentHistory[index];
+                            return Card(
+                              elevation: 1,
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: Colors.green[100],
+                                  child: const Icon(
+                                    Icons.check_circle_outline,
+                                    color: Colors.green,
+                                  ),
+                                ),
+                                title: Text(
+                                  'Paid: ${CurrencyFormatter.format(payment.amount)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Date: ${DateFormat.yMMMd().add_jm().format(payment.paymentDate)}',
+                                    ),
+                                    if (payment.method != null &&
+                                        payment.method!.isNotEmpty)
+                                      Text('Method: ${payment.method}'),
+                                    if (payment.notes != null &&
+                                        payment.notes!.isNotEmpty)
+                                      Text('Notes: ${payment.notes}'),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 24),
+                      ],
                       if (debt.status != 'PAID')
                         ElevatedButton.icon(
                           icon: const Icon(Icons.payment),
