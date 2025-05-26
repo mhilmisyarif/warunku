@@ -140,8 +140,8 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
   }
 
   void _removeItemEntry(int index) {
+    _itemEntries[index].dispose(); // Dispose controllers of the removed item
     setState(() {
-      _itemEntries[index].dispose(); // Dispose controllers of the removed item
       _itemEntries.removeAt(index);
       _calculateGrandTotal();
     });
@@ -150,11 +150,16 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
   void _calculateGrandTotal() {
     double total = 0;
     for (var entry in _itemEntries) {
-      total += entry.itemSubtotal;
+      total +=
+          entry
+              .itemSubtotal; // itemSubtotal getter in _DebtItemEntry uses its controllers
     }
-    setState(() {
-      _grandTotal = total;
-    });
+    if (mounted) {
+      // Check if widget is still in the tree before calling setState
+      setState(() {
+        _grandTotal = total;
+      });
+    }
   }
 
   Future<void> _selectDate(
@@ -233,11 +238,29 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
     }
   }
 
-  void _submitForm() {
+  Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) {
-      return; // Form is not valid
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please correct the errors in the form.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
-    if (_itemEntries.isEmpty) {
+    if (_itemEntries.any(
+      (entry) => entry.selectedProduct == null || entry.productId == null,
+    )) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a product for all items.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    if (_itemEntries.isEmpty && !_isEditing) {
+      // Don't allow submitting empty new debt
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please add at least one item to the debt.'),
@@ -249,33 +272,14 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
 
     final List<DebtItem> finalItems = [];
     for (var entry in _itemEntries) {
+      // Re-validate item specific fields that might not be covered by TextFormField validators
+      // or ensure their controllers have valid numbers if using tryParse
       final double quantity =
           double.tryParse(entry.quantityController.text) ?? 0;
       final double priceAtTime =
           double.tryParse(entry.priceAtTimeController.text) ?? 0;
 
-      if (entry.productId == null || entry.productId!.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Product not selected for an item: ${entry.productNameController.text}',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-      if (entry.unitLabelController.text.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Unit label missing for item: ${entry.productNameController.text}',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
+      // ProductId should be non-null due to the check above
       if (quantity <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -287,12 +291,11 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
         );
         return;
       }
-      if (priceAtTime < 0) {
-        // Price can be 0 for free items, but not negative
+      if (entry.unitLabelController.text.trim().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Price cannot be negative for item: ${entry.productNameController.text}',
+              'Unit label is missing for item: ${entry.productNameController.text}',
             ),
             backgroundColor: Colors.red,
           ),
@@ -305,16 +308,22 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
           productId: entry.productId!,
           productName:
               entry
-                  .productNameController
-                  .text, // Could be entry.selectedProduct.name
-          unitLabel:
-              entry
-                  .unitLabelController
-                  .text, // Could be entry.selectedUnit.label
+                  .selectedProduct!
+                  .name, // Use name from selectedProduct for accuracy
+          unitLabel: entry.selectedUnit!.label, // Use label from selectedUnit
           quantity: quantity,
           priceAtTimeOfDebt: priceAtTime,
-          totalPrice: quantity * priceAtTime, // Recalculate here to be sure
+          totalPrice:
+              quantity *
+              priceAtTime, // Recalculate here for final submission accuracy
         ),
+      );
+    }
+
+    // If editing and items list became empty, it means delete all items. Backend should handle this.
+    if (_isEditing && finalItems.isEmpty) {
+      print(
+        "Warning: Submitting an edit with no items. Backend should handle this as deleting all items or disallow.",
       );
     }
 
@@ -327,30 +336,65 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
             : null;
     final amountPaid = double.tryParse(_amountPaidController.text) ?? 0.0;
 
-    final debtRecord = DebtRecord(
-      // id is not needed for creation
-      customer: widget.customer.id!, // Send customer ID
+    // Recalculate grand total one last time from finalItems for submission
+    final double finalGrandTotal = finalItems.fold(
+      0,
+      (sum, item) => sum + item.totalPrice,
+    );
+
+    if (amountPaid > finalGrandTotal && finalGrandTotal > 0) {
+      // allow paying 0 for 0 total
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Amount paid initially cannot exceed the grand total.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final debtRecordPayload = DebtRecord(
+      id: widget.debtRecordToEdit?.id, // For updates
+      customer: widget.customer.id!,
       items: finalItems,
-      totalAmount:
-          _grandTotal, // Backend will recalculate but good to send estimate
+      totalAmount: finalGrandTotal, // Send the calculated final total
       amountPaid: amountPaid,
-      status: 'UNPAID', // Backend will set status based on payment
+      status:
+          'UNPAID', // Backend will derive this based on amountPaid and totalAmount
       debtDate: debtDate,
       dueDate: dueDate,
       notes: _notesController.text.trim(),
     );
 
-    // For editing, the logic would be different, dispatching an UpdateDebtRecord event
     if (_isEditing) {
-      // context.read<DebtBloc>().add(UpdateDebtRecord(widget.debtRecordToEdit!.id!, /* map of updated fields */));
+      if (widget.debtRecordToEdit?.id == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error: Debt ID missing for update.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      // Ensure updateData for BLoC is correct.
+      // The DebtBloc's UpdateDebtRecord event takes (String debtId, Map<String, dynamic> updateData)
+      // So we need to convert the debtRecordPayload to a suitable map.
+      // Or the BLoC event could take the full DebtRecord object for update.
+      // Let's assume the BLoC event can take the payload.
+      // If not, you'd do: context.read<DebtBloc>().add(UpdateDebtRecord(widget.debtRecordToEdit!.id!, debtRecordPayload.toJsonForUpdate()));
+      // For now, let's assume UpdateDebtRecord needs to be created in DebtEvent and handled in DebtBloc similar to AddDebtRecord
+      print(
+        "Dispatching UpdateDebtRecord (Not fully implemented in BLoC/Service example yet)",
+      );
+      // Example: context.read<DebtBloc>().add(UpdateDebtRecordEvent(widget.debtRecordToEdit!.id!, debtRecordPayload));
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Editing not fully implemented yet.'),
+          content: Text('Update logic needs full BLoC event/handler.'),
           backgroundColor: Colors.orange,
         ),
       );
     } else {
-      context.read<DebtBloc>().add(AddDebtRecord(debtRecord));
+      context.read<DebtBloc>().add(AddDebtRecord(debtRecordPayload));
     }
   }
 
@@ -384,6 +428,7 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                               entry.selectedProduct == null
                                   ? Theme.of(context).hintColor
                                   : null,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ),
@@ -395,14 +440,21 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                     tooltip: 'Clear Product Selection',
                     onPressed: () {
                       setState(() {
+                        // Reset the item entry, potentially keeping quantity if you want
+                        // For full reset of product related fields:
+                        String currentQuantity =
+                            entry.quantityController.text; // Preserve quantity
+                        _itemEntries[index]
+                            .dispose(); // Dispose old controllers
                         _itemEntries[index] = _DebtItemEntry(
-                          quantity: entry.quantityController.text,
-                        ); // Keep quantity
+                          quantity: currentQuantity,
+                        ); // New entry, pass preserved qty
                         _calculateGrandTotal();
                       });
                     },
                   ),
-                if (_itemEntries.length > 1)
+                if (_itemEntries.length > 1 ||
+                    _isEditing) // Allow removing if editing or more than one item
                   IconButton(
                     icon: const Icon(
                       Icons.remove_circle_outline,
@@ -414,7 +466,6 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
               ],
             ),
             const SizedBox(height: 10),
-            // Unit, Quantity, Price, Subtotal
             if (entry.selectedProduct != null) ...[
               Row(
                 children: [
@@ -426,7 +477,12 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                         labelText: 'Unit',
                         border: OutlineInputBorder(),
                       ),
-                      readOnly: true, // Unit is set via selection
+                      readOnly: true,
+                      validator:
+                          (value) =>
+                              (value == null || value.isEmpty)
+                                  ? 'Unit?'
+                                  : null, // Added validator
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -445,7 +501,13 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                         if (dVal == null || dVal <= 0) return 'Invalid';
                         return null;
                       },
-                      onChanged: (_) => _calculateGrandTotal(),
+                      onChanged: (value) {
+                        // This setState will trigger a rebuild, which will call itemSubtotal
+                        // and _calculateGrandTotal will update the grand total display.
+                        setState(() {
+                          _calculateGrandTotal();
+                        });
+                      },
                     ),
                   ),
                 ],
@@ -463,7 +525,15 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      readOnly: true, // Price is set via selection
+                      readOnly: true,
+                      validator: (value) {
+                        // Added validator
+                        if (value == null || value.isEmpty) return 'Price?';
+                        final dVal = double.tryParse(value);
+                        if (dVal == null || dVal < 0)
+                          return 'Invalid'; // Price can be 0
+                        return null;
+                      },
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -479,7 +549,9 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                           locale: 'id_ID',
                           symbol: 'Rp ',
                           decimalDigits: 0,
-                        ).format(entry.itemSubtotal),
+                        ).format(
+                          entry.itemSubtotal,
+                        ), // This relies on the getter
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
@@ -489,9 +561,15 @@ class _DebtRecordFormScreenState extends State<DebtRecordFormScreen> {
                   ),
                 ],
               ),
-            ] else if (entry.productId !=
-                null) // If product was selected but details are not fully loaded (e.g. editing)
-              const Text('Loading product details or unit not found...'),
+            ] else if (entry.productId != null && entry.selectedProduct == null)
+              const Padding(
+                // If a productId exists but product details aren't loaded (e.g. edit mode initialization)
+                padding: EdgeInsets.symmetric(vertical: 8.0),
+                child: Text(
+                  'Loading product details or product not found...',
+                  style: TextStyle(color: Colors.orange),
+                ),
+              ),
           ],
         ),
       ),
