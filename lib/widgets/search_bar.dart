@@ -1,34 +1,31 @@
 import 'package:flutter/material.dart';
 
-class ProductSearchBar extends StatelessWidget {
+/// Search field shown under an AppBar title (use as `AppBar.bottom`).
+class ProductSearchBar extends StatelessWidget implements PreferredSizeWidget {
   final ValueChanged<String> onChanged;
+  final String hintText;
 
-  const ProductSearchBar({Key? key, required this.onChanged}) : super(key: key);
+  const ProductSearchBar({
+    super.key,
+    required this.onChanged,
+    this.hintText = 'Cari produk...',
+  });
+
+  @override
+  Size get preferredSize => const Size.fromHeight(60);
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 40,
-      decoration: BoxDecoration(
-        color: Colors.grey[200],
-        borderRadius: BorderRadius.circular(20),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          const Icon(Icons.search, color: Colors.grey),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              onChanged: onChanged,
-              decoration: const InputDecoration(
-                hintText: 'Search products...',
-                border: InputBorder.none,
-              ),
-              style: const TextStyle(color: Colors.black),
-            ),
-          ),
-        ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: TextField(
+        onChanged: onChanged,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: hintText,
+          prefixIcon: const Icon(Icons.search),
+          isDense: true,
+        ),
       ),
     );
   }

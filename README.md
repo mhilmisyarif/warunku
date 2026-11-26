@@ -1,16 +1,52 @@
-# warunku
+# Warunku
 
-A new Flutter project.
+Manage products, customers and customer debts for a small shop ("warung").
 
-## Getting Started
+| Part | Folder | Stack |
+|------|--------|-------|
+| Mobile app | repository root (`lib/`, `test/`, platform folders) | Flutter, flutter_bloc |
+| API | [`backend/`](backend/README.md) | Node.js, Express, MongoDB (Mongoose) |
 
-This project is a starting point for a Flutter application.
+## Run the API
 
-A few resources to get you started if this is your first Flutter project:
+```sh
+cd backend
+cp .env.example .env   # then set MONGO_URL for your MongoDB
+npm install
+npm run dev            # http://localhost:3000/api
+```
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Or with Docker: `cd backend && docker compose up`. Seed sample data with `npm run seed`.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Run the app
+
+```sh
+flutter pub get
+flutter run
+```
+
+The app calls `http://10.0.2.2:3000/api` by default, which is the host machine as
+seen from the Android emulator. For a physical device or web, pass your machine's address:
+
+```sh
+flutter run --dart-define=API_BASE_URL=http://192.168.1.5:3000/api
+```
+
+## Tests
+
+```sh
+flutter analyze && flutter test
+```
+
+## App structure
+
+```
+lib/
+  config/     API base URL and image URL helper
+  models/     JSON models (Product, Customer, DebtRecord)
+  services/   ApiClient (HTTP, timeouts, errors) + one service per resource
+  blocs/      product/, customer/ (app-wide) and debt/ (one instance per screen)
+  screens/    product/, customer/, debt/
+  widgets/    shared widgets
+  utils/      theme and formatters
+```

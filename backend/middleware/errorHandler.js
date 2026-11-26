@@ -1,7 +1,8 @@
 const errorHandler = (err, req, res, next) => {
     console.error('ERROR STACK:', err.stack); // Log the error stack for debugging
 
-    let statusCode = err.statusCode || 500; // Default to 500 if no status code is set
+    // Controllers either set err.statusCode or call res.status(4xx) before throwing.
+    let statusCode = err.statusCode || (res.statusCode >= 400 ? res.statusCode : 500);
     let message = err.message || 'Internal Server Error';
 
     // Mongoose validation error

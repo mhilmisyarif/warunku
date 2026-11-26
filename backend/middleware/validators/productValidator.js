@@ -10,6 +10,16 @@ exports.validateIdParam = [
     }),
 ];
 
+// Optional per-unit fields; null/absent means "not set".
+const unitExtras = [
+    body('units.*.purchasePrice')
+        .optional({ values: 'null' })
+        .isFloat({ min: 0 }).withMessage('Purchase price must be zero or more.'),
+    body('units.*.stock')
+        .optional({ values: 'null' })
+        .isFloat({ min: 0 }).withMessage('Stock must be zero or more.'),
+];
+
 exports.validateCreateProduct = [
     body('name')
         .notEmpty().withMessage('Product name is required.')
@@ -29,8 +39,7 @@ exports.validateCreateProduct = [
         .trim(),
     body('units.*.sellingPrice')
         .isFloat({ gt: 0 }).withMessage('Selling price must be a positive number.'),
-    // body('units.*.purchasePrice').optional().isFloat({ gt: 0 }).withMessage('Purchase price must be a positive number.'),
-    // body('units.*.stock').optional().isInt({ gt: -1 }).withMessage('Stock must be a non-negative integer.'),
+    ...unitExtras,
     body('imagePath')
         .optional({ checkFalsy: true })
         .isString().withMessage('Image path must be a string.') // Or URL if you validate URLs
@@ -68,6 +77,7 @@ exports.validateUpdateProduct = [
         .optional()
         .if((value, { req, path }) => req.body.units && req.body.units[path.split('[')[1].split(']')[0]])
         .isFloat({ gt: 0 }).withMessage('Selling price must be a positive number when unit is provided.'),
+    ...unitExtras,
     body('imagePath')
         .optional({ checkFalsy: true })
         .isString().withMessage('Image path must be a string.')

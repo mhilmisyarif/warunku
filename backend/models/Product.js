@@ -11,8 +11,10 @@ const unitSchema = new mongoose.Schema({
         required: [true, 'Selling price is required.'],
         min: [0, 'Selling price cannot be negative.']
     },
-    // purchasePrice: { type: Number, min: [0, 'Purchase price cannot be negative.'] },
-    // stock: { type: Number, min: [0, 'Stock cannot be negative.'] }
+    // Cost price, used to show margin. Optional.
+    purchasePrice: { type: Number, min: [0, 'Purchase price cannot be negative.'] },
+    // Units on hand. Unset = stock is not tracked for this unit.
+    stock: { type: Number, min: [0, 'Stock cannot be negative.'] },
 });
 
 const productSchema = new mongoose.Schema(

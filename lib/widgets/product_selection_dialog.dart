@@ -1,20 +1,57 @@
-// lib/widgets/product_selection_dialog.dart
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:intl/intl.dart';
-import 'package:warunku/blocs/products/product_event.dart';
-import 'package:warunku/blocs/products/product_state.dart';
+
 import '../models/product.dart';
-import '../blocs/products/product_bloc.dart';
+import '../services/product_service.dart';
+import '../utils/formatter.dart';
+import 'product_card.dart';
 
 class ProductSelectionResult {
   final Product product;
   final ProductUnit selectedUnit;
 
-  ProductSelectionResult({required this.product, required this.selectedUnit});
+  const ProductSelectionResult({
+    required this.product,
+    required this.selectedUnit,
+  });
 }
 
+/// Asks which unit of [product] to use; skips the question when there is
+/// only one. Out-of-stock units can't be picked. Null when cancelled.
+Future<ProductUnit?> pickUnit(BuildContext context, Product product) async {
+  if (product.units.length == 1) return product.units.first;
+  return showDialog<ProductUnit>(
+    context: context,
+    builder:
+        (dialogContext) => SimpleDialog(
+          title: Text('Pilih satuan ${product.name}'),
+          children: [
+            for (final unit in product.units)
+              SimpleDialogOption(
+                onPressed:
+                    unit.isOutOfStock
+                        ? null
+                        : () => Navigator.pop(dialogContext, unit),
+                child: Text(
+                  '${unit.label} — ${CurrencyFormatter.format(unit.sellingPrice)}'
+                  '${unit.isOutOfStock ? ' (habis)' : ''}',
+                  style: TextStyle(
+                    color:
+                        unit.isOutOfStock
+                            ? Theme.of(context).disabledColor
+                            : null,
+                  ),
+                ),
+              ),
+          ],
+        ),
+  );
+}
+
+/// Lets the user search for a product and pick one of its units.
+/// Searches on its own so it never disturbs the shared product list.
 class ProductSelectionDialog extends StatefulWidget {
   const ProductSelectionDialog({super.key});
 
@@ -23,16 +60,13 @@ class ProductSelectionDialog extends StatefulWidget {
 }
 
 class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
-  String _searchTerm = '';
   Timer? _debounce;
-  // No need for _products list here if BlocBuilder handles it directly from ProductBloc state
+  late Future<List<Product>> _products;
 
   @override
   void initState() {
     super.initState();
-    // Initial fetch if desired, or rely on search
-    // If ProductBloc's initial state is ProductLoaded, this isn't strictly needed for empty search
-    // context.read<ProductBloc>().add(const SearchProducts("")); // Load all initially or by default
+    _products = _search('');
   }
 
   @override
@@ -41,148 +75,106 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
     super.dispose();
   }
 
+  Future<List<Product>> _search(String query) =>
+      context.read<ProductService>().getProducts(searchTerm: query);
+
   void _onSearchChanged(String query) {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () {
-      // No need to setState for _searchTerm if it's only used for dispatching
-      context.read<ProductBloc>().add(SearchProducts(query));
+      setState(() => _products = _search(query));
     });
   }
 
-  Future<void> _onProductTapped(
-    BuildContext dialogPageContext,
-    Product product,
-  ) async {
+  Future<void> _onProductTapped(Product product) async {
     if (product.units.isEmpty) {
-      Navigator.of(dialogPageContext).pop(); // Close product selection
       ScaffoldMessenger.of(context).showSnackBar(
-        // Use original context for SnackBar
-        const SnackBar(
-          content: Text('Selected product has no units defined.'),
-          backgroundColor: Colors.orange,
-        ),
+        const SnackBar(content: Text('Produk ini belum punya satuan.')),
       );
       return;
     }
 
-    ProductUnit? chosenUnit;
-
-    if (product.units.length == 1) {
-      chosenUnit = product.units.first;
-    } else {
-      chosenUnit = await showDialog<ProductUnit?>(
-        context:
-            dialogPageContext, // Use the context of the current dialog page
-        builder:
-            (unitDialogContext) => AlertDialog(
-              title: Text('Select Unit for ${product.name}'),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: product.units.length,
-                  itemBuilder: (BuildContext context, int index) {
-                    final unit = product.units[index];
-                    return ListTile(
-                      title: Text(unit.label),
-                      subtitle: Text(
-                        NumberFormat.currency(
-                          locale: 'id_ID',
-                          symbol: 'Rp ',
-                          decimalDigits: 0,
-                        ).format(unit.sellingPrice),
-                      ),
-                      onTap: () {
-                        Navigator.of(unitDialogContext).pop(unit);
-                      },
-                    );
-                  },
-                ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  child: const Text('Cancel'),
-                  onPressed: () => Navigator.of(unitDialogContext).pop(),
-                ),
-              ],
-            ),
+    final unit = await pickUnit(context, product);
+    if (unit != null && mounted) {
+      Navigator.pop(
+        context,
+        ProductSelectionResult(product: product, selectedUnit: unit),
       );
     }
-
-    if (chosenUnit != null) {
-      // Pop the main ProductSelectionDialog with the result
-      Navigator.of(
-        dialogPageContext,
-      ).pop(ProductSelectionResult(product: product, selectedUnit: chosenUnit));
-    }
-    // If chosenUnit is null (e.g., unit selection was cancelled), do nothing, dialog remains.
-    // Or you could pop with null: Navigator.of(dialogPageContext).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Select Product'),
+      title: const Text('Pilih Produk'),
       contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       content: SizedBox(
         width: double.maxFinite,
-        height: MediaQuery.of(context).size.height * 0.7,
+        height: MediaQuery.of(context).size.height * 0.6,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
+          children: [
             TextField(
               autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Search Products',
-                hintText: 'Type product name...',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+              decoration: const InputDecoration(
+                hintText: 'Cari produk',
+                prefixIcon: Icon(Icons.search),
               ),
               onChanged: _onSearchChanged,
             ),
             const SizedBox(height: 10),
             Expanded(
-              child: BlocBuilder<ProductBloc, ProductState>(
-                builder: (context, state) {
-                  if (state is ProductLoading) {
-                    return const Center(child: CircularProgressIndicator());
-                  } else if (state is ProductLoaded) {
-                    if (state.products.isEmpty) {
-                      return const Center(child: Text('No products found.'));
-                    }
-                    return ListView.builder(
-                      itemCount: state.products.length,
-                      itemBuilder: (BuildContext context, int index) {
-                        final product = state.products[index];
-                        return ListTile(
-                          title: Text(product.name),
-                          subtitle: Text(product.category),
-                          onTap:
-                              () => _onProductTapped(
-                                this.context,
-                                product,
-                              ), // Pass AlertDialog's context
-                        );
-                      },
-                    );
-                  } else if (state is ProductError) {
-                    return Center(child: Text('Error: ${state.message}'));
+              child: FutureBuilder<List<Product>>(
+                future: _products,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(child: Text('${snapshot.error}'));
                   }
-                  return const Center(child: Text('Type to search products.'));
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final products = snapshot.data!;
+                  if (products.isEmpty) {
+                    return const Center(child: Text('Produk tidak ditemukan.'));
+                  }
+                  return ListView.builder(
+                    itemCount: products.length,
+                    itemBuilder: (context, index) {
+                      final product = products[index];
+                      final (icon, color) = ProductCard.categoryStyle(
+                        product.category,
+                      );
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          backgroundColor: color.withValues(alpha: 0.12),
+                          child: Icon(icon, color: color),
+                        ),
+                        title: Text(product.name),
+                        subtitle: Text(product.category),
+                        trailing:
+                            product.units.isEmpty
+                                ? null
+                                : Text(
+                                  CurrencyFormatter.format(
+                                    product.units.first.sellingPrice,
+                                  ),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                        onTap: () => _onProductTapped(product),
+                      );
+                    },
+                  );
                 },
               ),
             ),
           ],
         ),
       ),
-      actions: <Widget>[
+      actions: [
         TextButton(
-          child: const Text('Cancel'),
-          onPressed: () {
-            Navigator.of(context).pop();
-          },
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Batal'),
         ),
       ],
     );

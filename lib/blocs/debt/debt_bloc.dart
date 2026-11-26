@@ -1,167 +1,117 @@
-import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
 import '../../models/debt_record.dart';
 import '../../services/debt_service.dart';
-import '../../services/customer_service.dart'; // If fetching debts by customer from CustomerService
 
 part 'debt_event.dart';
 part 'debt_state.dart';
 
+/// Not global: each debt screen creates its own instance, so a list, a detail
+/// view and a form never overwrite each other's state.
 class DebtBloc extends Bloc<DebtEvent, DebtState> {
-  final DebtService debtService;
-  final CustomerService customerService; // For fetching debts by customer ID
-
-  DebtBloc({required this.debtService, required this.customerService})
-    : super(DebtInitial()) {
-    on<LoadDebts>(_onLoadDebts);
-    on<LoadDebtById>(_onLoadDebtById);
-    on<AddDebtRecord>(_onAddDebtRecord);
-    on<UpdateDebtRecord>(_onUpdateDebtRecord);
+  DebtBloc(this._service) : super(DebtInitial()) {
+    on<LoadDebts>(_onLoad);
+    on<LoadMoreDebts>(_onLoadMore);
+    on<LoadDebtById>(_onLoadById);
+    on<AddDebtRecord>(_onAdd);
+    on<RecordPayment>(_onRecordPayment);
   }
 
-  Future<void> _onLoadDebts(LoadDebts event, Emitter<DebtState> emit) async {
-    final currentState = state;
+  final DebtService _service;
+  LoadDebts? _latestLoad;
 
-    // Prevent multiple rapid loads if not refreshing
-    if (!event.refresh &&
-        currentState is DebtLoading &&
-        currentState.isFetchingMore)
-      return;
-    if (!event.refresh &&
-        currentState is DebtsLoaded &&
-        currentState.hasReachedMax &&
-        event.page > currentState.currentPage)
-      return;
-
-    if (event.refresh || event.page == 1 || currentState is! DebtsLoaded) {
-      emit(const DebtLoading(isFetchingMore: false)); // Initial load or refresh
-    } else if (currentState is DebtsLoaded && !currentState.hasReachedMax) {
-      emit(const DebtLoading(isFetchingMore: true)); // Loading more
-    }
-
+  Future<void> _onLoad(LoadDebts event, Emitter<DebtState> emit) async {
+    _latestLoad = event;
+    emit(DebtLoading());
     try {
-      PaginatedDebtRecordsResponse paginatedResponse;
-      if (event.customerId != null && event.customerId!.isNotEmpty) {
-        // Fetching debts for a specific customer
-        paginatedResponse = await customerService.getDebtsByCustomerId(
-          event.customerId!,
-          status: event.status,
-          startDate: event.startDate,
-          endDate: event.endDate,
-          page: event.page,
-          limit: event.limit,
-        );
-      } else {
-        // Fetching all debts (or filtered globally)
-        paginatedResponse = await debtService.getDebtRecords(
-          status: event.status,
-          startDate: event.startDate,
-          endDate: event.endDate,
-          page: event.page,
-          limit: event.limit,
-        );
-      }
-
-      bool hasReachedMax =
-          paginatedResponse.debtRecords.isEmpty ||
-          paginatedResponse.currentPage >= paginatedResponse.totalPages;
-
-      if (currentState is DebtsLoaded && !event.refresh && event.page > 1) {
-        // Append new debt records for "load more"
-        emit(
-          currentState.copyWith(
-            debtRecords:
-                currentState.debtRecords + paginatedResponse.debtRecords,
-            currentPage: paginatedResponse.currentPage,
-            totalPages: paginatedResponse.totalPages,
-            hasReachedMax: hasReachedMax,
-            // customerName will be set if it's from customerService, otherwise null
-            customerName:
-                event.customerId != null
-                    ? paginatedResponse.customerName
-                    : null,
-          ),
-        );
-      } else {
-        // First load or refresh
-        emit(
-          DebtsLoaded(
-            debtRecords: paginatedResponse.debtRecords,
-            currentPage: paginatedResponse.currentPage,
-            totalPages: paginatedResponse.totalPages,
-            totalDebtRecords: paginatedResponse.totalDebtRecords,
-            hasReachedMax: hasReachedMax,
-            customerName:
-                event.customerId != null
-                    ? paginatedResponse.customerName
-                    : null,
-          ),
-        );
-      }
-    } catch (e) {
-      emit(DebtError("Failed to load debt records: ${e.toString()}"));
-    }
-  }
-
-  Future<void> _onLoadDebtById(
-    LoadDebtById event,
-    Emitter<DebtState> emit,
-  ) async {
-    emit(const DebtLoading());
-    try {
-      final debtRecord = await debtService.getDebtRecordById(event.debtId);
-      emit(DebtLoaded(debtRecord));
-    } catch (e) {
-      emit(DebtError("Failed to load debt details: ${e.toString()}"));
-    }
-  }
-
-  Future<void> _onAddDebtRecord(
-    AddDebtRecord event,
-    Emitter<DebtState> emit,
-  ) async {
-    emit(const DebtLoading());
-    try {
-      final newDebtRecord = await debtService.createDebtRecord(
-        event.debtRecord,
+      final page = await _service.getDebtRecords(
+        customerId: event.customerId,
+        status: event.status,
       );
+      // Drop results of a filter change that has since been superseded.
+      if (!identical(event, _latestLoad)) return;
       emit(
-        DebtOperationSuccess(
-          message: "Debt record added successfully!",
-          debtRecord: newDebtRecord,
+        DebtsLoaded(
+          debtRecords: page.debtRecords,
+          customerId: event.customerId,
+          status: event.status,
+          currentPage: page.currentPage,
+          hasReachedMax: page.currentPage >= page.totalPages,
         ),
       );
-      // Optionally dispatch LoadDebts to refresh the list shown in UI
-      // e.g., add(LoadDebts(customerId: newDebtRecord.customerId, refresh: true));
     } catch (e) {
-      emit(DebtError("Failed to add debt record: ${e.toString()}"));
+      if (!identical(event, _latestLoad)) return;
+      emit(DebtError('Gagal memuat utang: $e'));
     }
   }
 
-  Future<void> _onUpdateDebtRecord(
-    UpdateDebtRecord event,
+  Future<void> _onLoadMore(LoadMoreDebts event, Emitter<DebtState> emit) async {
+    final current = state;
+    if (current is! DebtsLoaded ||
+        current.hasReachedMax ||
+        current.isLoadingMore) {
+      return;
+    }
+    final load = _latestLoad;
+    emit(current.copyWith(isLoadingMore: true));
+    try {
+      final page = await _service.getDebtRecords(
+        customerId: current.customerId,
+        status: current.status,
+        page: current.currentPage + 1,
+      );
+      final latest = state;
+      if (latest is! DebtsLoaded || !identical(load, _latestLoad)) return;
+      final knownIds = latest.debtRecords.map((d) => d.id).toSet();
+      emit(
+        latest.copyWith(
+          debtRecords: [
+            ...latest.debtRecords,
+            ...page.debtRecords.where((d) => !knownIds.contains(d.id)),
+          ],
+          currentPage: page.currentPage,
+          hasReachedMax:
+              page.debtRecords.isEmpty || page.currentPage >= page.totalPages,
+          isLoadingMore: false,
+        ),
+      );
+    } catch (_) {
+      final latest = state;
+      if (latest is DebtsLoaded) emit(latest.copyWith(isLoadingMore: false));
+    }
+  }
+
+  Future<void> _onLoadById(LoadDebtById event, Emitter<DebtState> emit) async {
+    emit(DebtLoading());
+    try {
+      emit(DebtLoaded(await _service.getDebtRecordById(event.debtId)));
+    } catch (e) {
+      emit(DebtError('Gagal memuat utang: $e'));
+    }
+  }
+
+  Future<void> _onAdd(AddDebtRecord event, Emitter<DebtState> emit) async {
+    emit(DebtSaving());
+    try {
+      await _service.createDebtRecord(event.debtRecord);
+      emit(const DebtOperationSuccess('Catatan utang ditambahkan.'));
+    } catch (e) {
+      emit(DebtOperationFailure('Gagal menambah utang: $e'));
+    }
+  }
+
+  Future<void> _onRecordPayment(
+    RecordPayment event,
     Emitter<DebtState> emit,
   ) async {
-    // Optional: emit a specific "DebtUpdating" state if you want fine-grained loading for the button
-    // emit(DebtUpdating(debtId: event.debtId)); // You'd need to define this state
-
+    emit(DebtSaving());
     try {
-      final updatedDebtRecord = await debtService.updateDebtRecord(
-        event.debtId,
-        event.updateData,
-      );
-
-      if (updatedDebtRecord != null && updatedDebtRecord.id != null) {
-        // Directly emit DebtLoaded with the updated record.
-        // The UI will listen for this to update content AND to show a success message.
-        emit(DebtLoaded(updatedDebtRecord));
-      } else {
-        emit(
-          DebtError("Failed to retrieve updated debt details after payment."),
-        );
-      }
+      final updated = await _service.addPayment(event.debtId, event.payment);
+      emit(const DebtOperationSuccess('Pembayaran dicatat.'));
+      emit(DebtLoaded(updated));
     } catch (e) {
-      emit(DebtError("Failed to update debt record: ${e.toString()}"));
+      emit(DebtOperationFailure('Gagal mencatat pembayaran: $e'));
     }
   }
 }

@@ -10,6 +10,7 @@ const connectDB = require('./config/db');
 const productRoutes = require('./routes/productRoutes');
 const customerRoutes = require('./routes/customerRoutes'); // New
 const debtRoutes = require('./routes/debtRoutes');     // New
+const saleRoutes = require('./routes/saleRoutes');
 const errorHandler = require('./middleware/errorHandler');
 
 connectDB();
@@ -36,6 +37,7 @@ app.get('/', (req, res) => {
 app.use('/api/products', productRoutes);
 app.use('/api/customers', customerRoutes); // Add customer routes
 app.use('/api/debts', debtRoutes);         // Add debt routes
+app.use('/api/sales', saleRoutes);
 
 app.use(errorHandler);
 

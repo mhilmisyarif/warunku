@@ -1,36 +1,31 @@
-import 'package:flutter/material.dart';
-import '../../models/product.dart';
-import 'product_detail_screen.dart';
-import 'product_form_screen.dart';
-import '../../services/product_service.dart';
-import '../../widgets/product_card.dart';
-import '../../widgets/search_bar.dart';
-
 import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../blocs/cart/cart_cubit.dart';
+import '../../blocs/product/product_bloc.dart';
+import '../../models/product.dart';
+import '../../utils/formatter.dart';
+import '../../widgets/error_view.dart';
+import '../../widgets/product_card.dart';
+import '../../widgets/product_selection_dialog.dart';
+import '../../widgets/search_bar.dart';
+import '../cart/cart_screen.dart';
+import 'product_detail_screen.dart';
+import 'product_form_screen.dart';
+
 class ProductListScreen extends StatefulWidget {
+  const ProductListScreen({super.key});
+
   @override
-  _ProductListScreenState createState() => _ProductListScreenState();
+  State<ProductListScreen> createState() => _ProductListScreenState();
 }
 
 class _ProductListScreenState extends State<ProductListScreen> {
-  List<Product> products = [];
-  List<Product> filteredProducts = [];
-  bool isLoading = true;
-  String searchQuery = '';
   Timer? _debounce;
-
-  // Create an instance of ProductService
-  final ProductService _productService = ProductService(); // NEW INSTANCE
-
-  static const String _noProductsFoundText = 'No products found.';
-  static const String _errorFetchingProductsText = 'Error fetching products: ';
-
-  @override
-  void initState() {
-    super.initState();
-    fetchProducts();
-  }
+  String _query = '';
+  String? _category; // null = all categories
 
   @override
   void dispose() {
@@ -38,131 +33,188 @@ class _ProductListScreenState extends State<ProductListScreen> {
     super.dispose();
   }
 
-  Future<void> fetchProducts() async {
-    if (!mounted) return;
-    setState(() => isLoading = true);
-    try {
-      // CORRECTED WAY: Call the method on the instance
-      final data = await _productService.getAllProducts(
-        searchTerm: searchQuery,
-      ); // Pass search query
-      // Note: I've assumed getAllProducts now takes an optional searchTerm.
-      // Adjust if your ProductService.getAllProducts signature is different.
-      // If it doesn't take a searchTerm, you'll filter locally *after* fetching all products.
-
-      if (!mounted) return; // Check mounted again after await
-      setState(() {
-        products = data;
-        // Apply local filtering if `getAllProducts` doesn't filter on backend
-        // or if you want to refine search on already fetched data
-        if (searchQuery.isEmpty) {
-          filteredProducts = List.from(products);
-        } else {
-          _filterProductsLocally(); // Call the local filter method
-        }
-        isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => isLoading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$_errorFetchingProductsText$e')));
-    }
-  }
-
-  void _filterProductsLocally() {
-    if (searchQuery.isEmpty) {
-      filteredProducts = List.from(products);
-    } else {
-      filteredProducts =
-          products
-              .where(
-                (product) => product.name.toLowerCase().contains(
-                  searchQuery.toLowerCase(),
-                ),
-              )
-              .toList();
-    }
-  }
-
-  void navigateToForm() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ProductFormScreen()),
-    );
-    if (result == true && mounted) {
-      fetchProducts(); // Re-fetch products or only the affected ones
-    }
-  }
-
-  void navigateToDetail(Product product) async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product)),
-    );
-    if (result == true && mounted) {
-      fetchProducts();
-    }
-  }
-
-  void updateSearchQuery(String query) {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
+  void _onSearchChanged(String query) {
+    _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 500), () {
-      if (!mounted) return;
-      setState(() {
-        searchQuery = query;
-        // Option 1: Re-fetch from backend with search term
-        fetchProducts();
-
-        // Option 2: If you prefer local filtering after an initial full fetch
-        // _filterProductsLocally();
-        // if (products.isNotEmpty && query.isNotEmpty) {
-        //   _filterProductsLocally();
-        // } else if (query.isEmpty) {
-        //    filteredProducts = List.from(products);
-        // }
-      });
+      _query = query;
+      _load();
     });
+  }
+
+  void _load() => context.read<ProductBloc>().add(LoadProducts(query: _query));
+
+  Future<void> _refresh() async {
+    final bloc = context.read<ProductBloc>()..add(LoadProducts(query: _query));
+    await bloc.stream.firstWhere(
+      (s) => s is ProductLoaded || s is ProductError,
+    );
+  }
+
+  void _open(Widget screen) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+
+  Future<void> _addToCart(Product product) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final cart = context.read<CartCubit>();
+    final unit = await pickUnit(context, product);
+    if (unit == null) return;
+    // Success needs no snackbar: the cart bar's count and total update, and a
+    // floating snackbar would cover that bar.
+    if (!cart.add(product, unit)) {
+      showResultSnackBar(
+        messenger,
+        'Stok ${product.name} (${unit.label}) tidak cukup',
+        success: false,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: ProductSearchBar(onChanged: updateSearchQuery),
-        // backgroundColor: Theme.of(context).primaryColor, // Assuming this comes from your theme
+        title: const Text('Produk'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add_box_outlined),
+            tooltip: 'Tambah Produk',
+            onPressed: () => _open(const ProductFormScreen()),
+          ),
+        ],
+        bottom: ProductSearchBar(onChanged: _onSearchChanged),
       ),
-      body:
-          isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : filteredProducts.isEmpty && searchQuery.isNotEmpty
-              ? Center(child: Text('No products found for "$searchQuery".'))
-              : filteredProducts.isEmpty &&
-                  products
-                      .isNotEmpty // No search query but still no filtered results (should not happen if filter logic is correct)
-              ? const Center(child: Text(_noProductsFoundText))
-              : products
-                  .isEmpty // No products at all
-              ? const Center(
-                child: Text('No products available.'),
-              ) // More specific message
-              : RefreshIndicator(
-                onRefresh: fetchProducts,
-                child: ListView.builder(
-                  itemCount: filteredProducts.length,
-                  itemBuilder: (context, index) {
-                    return ProductCard(
-                      product: filteredProducts[index],
-                      onTap: () => navigateToDetail(filteredProducts[index]),
-                    );
-                  },
+      body: BlocBuilder<ProductBloc, ProductState>(
+        buildWhen: (_, current) => current.isListState,
+        builder: (context, state) {
+          return switch (state) {
+            ProductLoaded(:final products, :final query) => _buildList(
+              products,
+              query,
+            ),
+            ProductError(:final message) => ErrorView(
+              message: message,
+              onRetry: _load,
+            ),
+            _ => const Center(child: CircularProgressIndicator()),
+          };
+        },
+      ),
+      bottomNavigationBar: _CartBar(onOpen: () => _open(const CartScreen())),
+    );
+  }
+
+  Widget _buildList(List<Product> products, String query) {
+    final categories =
+        {
+            for (final p in products)
+              if (p.category.isNotEmpty) p.category,
+          }.toList()
+          ..sort();
+    // A category that vanished after a search no longer filters anything.
+    final category = categories.contains(_category) ? _category : null;
+    final shown =
+        category == null
+            ? products
+            : products.where((p) => p.category == category).toList();
+
+    return Column(
+      children: [
+        if (categories.length > 1)
+          SizedBox(
+            height: 48,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              children: [
+                ChoiceChip(
+                  label: const Text('Semua'),
+                  selected: category == null,
+                  onSelected: (_) => setState(() => _category = null),
                 ),
+                for (final c in categories) ...[
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: Text(c),
+                    selected: category == c,
+                    onSelected: (_) => setState(() => _category = c),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            child:
+                shown.isEmpty
+                    ? ListView(
+                      children: [
+                        const SizedBox(height: 80),
+                        EmptyView(
+                          icon: Icons.inventory_2_outlined,
+                          message:
+                              query.isEmpty
+                                  ? 'Belum ada produk. Ketuk ikon + di atas untuk menambah.'
+                                  : 'Produk "$query" tidak ditemukan.',
+                        ),
+                      ],
+                    )
+                    : ListView.builder(
+                      padding: const EdgeInsets.only(top: 4, bottom: 16),
+                      itemCount: shown.length,
+                      itemBuilder:
+                          (context, index) => ProductCard(
+                            product: shown[index],
+                            onTap:
+                                () => _open(
+                                  ProductDetailScreen(product: shown[index]),
+                                ),
+                            onAdd: () => _addToCart(shown[index]),
+                          ),
+                    ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Cart summary pinned above the tab bar; hidden while the cart is empty.
+class _CartBar extends StatelessWidget {
+  const _CartBar({required this.onOpen});
+
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<CartCubit, List<CartLine>>(
+      builder: (context, lines) {
+        if (lines.isEmpty) return const SizedBox.shrink();
+        final cart = context.read<CartCubit>();
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: FilledButton(
+              onPressed: onOpen,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
               ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: navigateToForm,
-        child: const Icon(Icons.add),
-      ),
+              child: Row(
+                children: [
+                  Badge(
+                    label: Text('${lines.length}'),
+                    child: const Icon(Icons.shopping_cart_outlined),
+                  ),
+                  const SizedBox(width: 16),
+                  const Expanded(child: Text('Lihat keranjang')),
+                  Text(CurrencyFormatter.format(cart.total)),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

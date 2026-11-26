@@ -1,7 +1,7 @@
 // controllers/debtController.js
 const DebtRecord = require('../models/DebtRecord');
 const Customer = require('../models/Customer');
-const Product = require('../models/Product'); // To verify product and get price if needed
+const { resolveItems, deductStock } = require('../services/lineItems');
 const asyncHandler = require('express-async-handler');
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
@@ -25,42 +25,22 @@ exports.createDebtRecord = asyncHandler(async (req, res) => {
         throw new Error('Customer not found.');
     }
 
-    const processedItems = [];
-    let calculatedTotalAmount = 0;
+    // Debts may carry the price agreed at the time; otherwise the current price.
+    const lines = await resolveItems(rawItems, (raw) => raw.priceAtTimeOfDebt);
+    const processedItems = lines.map(({ product, unit, quantity, price, totalPrice }) => ({
+        product: product._id,
+        productName: product.name, // Denormalized product name
+        unitLabel: unit.label,
+        quantity,
+        priceAtTimeOfDebt: price,
+        totalPrice,
+    }));
+    const calculatedTotalAmount = processedItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
-    for (const rawItem of rawItems) {
-        const product = await Product.findById(rawItem.product);
-        if (!product) {
-            res.status(404);
-            throw new Error(`Product with ID ${rawItem.product} not found.`);
-        }
-
-        // Find the specific unit from the product to get its price
-        const productUnit = product.units.find(u => u.label.toLowerCase() === rawItem.unitLabel.toLowerCase());
-        if (!productUnit) {
-            res.status(400);
-            throw new Error(`Unit '${rawItem.unitLabel}' not found for product '${product.name}'.`);
-        }
-
-        // Use provided priceAtTimeOfDebt if available, otherwise fetch current sellingPrice of the unit
-        const priceForThisItem = rawItem.priceAtTimeOfDebt !== undefined ? rawItem.priceAtTimeOfDebt : productUnit.sellingPrice;
-
-        if (priceForThisItem === undefined || priceForThisItem < 0) {
-            res.status(400);
-            throw new Error(`Invalid price for unit '${rawItem.unitLabel}' of product '${product.name}'. Ensure priceAtTimeOfDebt is provided or the product unit has a selling price.`);
-        }
-
-        const itemTotalPrice = rawItem.quantity * priceForThisItem;
-        calculatedTotalAmount += itemTotalPrice;
-
-        processedItems.push({
-            product: product._id,
-            productName: product.name, // Denormalized product name
-            unitLabel: productUnit.label, // Use the matched unit label for consistency
-            quantity: rawItem.quantity,
-            priceAtTimeOfDebt: priceForThisItem,
-            totalPrice: itemTotalPrice,
-        });
+    const initialPayment = Number(amountPaid) || 0;
+    if (initialPayment > calculatedTotalAmount) {
+        res.status(400);
+        throw new Error('Initial payment cannot exceed the total amount.');
     }
 
     const debtRecord = new DebtRecord({
@@ -70,11 +50,16 @@ exports.createDebtRecord = asyncHandler(async (req, res) => {
         debtDate: debtDate || Date.now(),
         dueDate,
         notes,
-        amountPaid: amountPaid || 0
+        // The pre-save hook derives amountPaid from paymentHistory, so an
+        // initial payment must be recorded as a history entry to survive.
+        paymentHistory: initialPayment > 0
+            ? [{ amount: initialPayment, paymentDate: debtDate || Date.now(), method: 'Initial payment' }]
+            : [],
     });
 
     // The pre-save hook in DebtRecord model will handle status and re-calculate totalAmount.
     const createdDebtRecord = await debtRecord.save();
+    await deductStock(lines);
     res.status(201).json(createdDebtRecord);
 });
 
