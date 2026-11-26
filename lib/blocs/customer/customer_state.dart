@@ -1,87 +1,89 @@
-part of 'customer_bloc.dart'; // Will be created next
+part of 'customer_bloc.dart';
 
-abstract class CustomerState extends Equatable {
+sealed class CustomerState extends Equatable {
   const CustomerState();
 
   @override
   List<Object?> get props => [];
 }
 
-// Initial state
+// --- List states: drive the customer list. ---
+
 class CustomerInitial extends CustomerState {}
 
-// Loading state
 class CustomerLoading extends CustomerState {}
 
-// State when multiple customers are successfully loaded
 class CustomersLoaded extends CustomerState {
   final List<Customer> customers;
+  final String searchTerm;
   final int currentPage;
-  final int totalPages;
-  final int totalCustomers;
-  final bool hasReachedMax; // For pagination, true if no more pages
+  final bool hasReachedMax;
+  final bool isLoadingMore;
 
   const CustomersLoaded({
     required this.customers,
-    required this.currentPage,
-    required this.totalPages,
-    required this.totalCustomers,
+    this.searchTerm = '',
+    this.currentPage = 1,
     this.hasReachedMax = false,
+    this.isLoadingMore = false,
   });
 
   CustomersLoaded copyWith({
     List<Customer>? customers,
     int? currentPage,
-    int? totalPages,
-    int? totalCustomers,
     bool? hasReachedMax,
-  }) {
-    return CustomersLoaded(
-      customers: customers ?? this.customers,
-      currentPage: currentPage ?? this.currentPage,
-      totalPages: totalPages ?? this.totalPages,
-      totalCustomers: totalCustomers ?? this.totalCustomers,
-      hasReachedMax: hasReachedMax ?? this.hasReachedMax,
-    );
-  }
+    bool? isLoadingMore,
+  }) => CustomersLoaded(
+    customers: customers ?? this.customers,
+    searchTerm: searchTerm,
+    currentPage: currentPage ?? this.currentPage,
+    hasReachedMax: hasReachedMax ?? this.hasReachedMax,
+    isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+  );
 
   @override
   List<Object?> get props => [
     customers,
+    searchTerm,
     currentPage,
-    totalPages,
-    totalCustomers,
     hasReachedMax,
+    isLoadingMore,
   ];
 }
 
-// State when a single customer is successfully loaded
-class CustomerLoaded extends CustomerState {
-  final Customer customer;
-
-  const CustomerLoaded(this.customer);
-
-  @override
-  List<Object?> get props => [customer];
-}
-
-// State for successful operations (add, update, delete) that don't necessarily return a list
-class CustomerOperationSuccess extends CustomerState {
-  final String message;
-  final Customer? customer; // Optionally return the affected customer
-
-  const CustomerOperationSuccess({required this.message, this.customer});
-
-  @override
-  List<Object?> get props => [message, customer];
-}
-
-// Error state
 class CustomerError extends CustomerState {
   final String message;
-
   const CustomerError(this.message);
 
   @override
   List<Object?> get props => [message];
+}
+
+// --- Operation states: one-off results of save/delete, for listeners. ---
+
+class CustomerSaving extends CustomerState {}
+
+class CustomerOperationSuccess extends CustomerState {
+  final String message;
+  const CustomerOperationSuccess(this.message);
+
+  @override
+  List<Object?> get props => [message];
+}
+
+class CustomerOperationFailure extends CustomerState {
+  final String message;
+  const CustomerOperationFailure(this.message);
+
+  @override
+  List<Object?> get props => [message];
+}
+
+extension CustomerStateX on CustomerState {
+  /// Whether this state describes the customer list (vs. a save/delete result).
+  bool get isListState =>
+      this is CustomerInitial ||
+      this is CustomerLoading ||
+      this is CustomersLoaded ||
+      this is CustomerError;
 }

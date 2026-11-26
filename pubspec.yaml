@@ -1,5 +1,5 @@
 name: warunku
-description: "A new Flutter project."
+description: "Warunku: product, customer and debt management for a small shop."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -30,17 +30,15 @@ environment:
 dependencies:
   bloc: ^9.0.0
   cupertino_icons: ^1.0.8
-  dio: ^5.8.0+1
   equatable: ^2.0.7
   flutter:
     sdk: flutter
   flutter_bloc: ^9.1.1
+  flutter_localizations:
+    sdk: flutter
   http: ^1.4.0
-  http_parser: ^4.1.2
   image_picker: ^1.1.2
   intl: ^0.20.2
-  path: ^1.9.1
-  provider: ^6.1.5
 
 dev_dependencies:
   flutter_lints: ^5.0.0

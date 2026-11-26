@@ -1,12 +1,13 @@
-// lib/screens/customer/customer_form_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+
 import '../../blocs/customer/customer_bloc.dart';
 import '../../models/customer.dart';
+import '../../widgets/error_view.dart';
 
 class CustomerFormScreen extends StatefulWidget {
-  final Customer?
-  customer; // Nullable: if null, it's 'Add' mode, else 'Edit' mode
+  /// Null to add a new customer, otherwise the customer being edited.
+  final Customer? customer;
 
   const CustomerFormScreen({super.key, this.customer});
 
@@ -43,72 +44,75 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
   }
 
   void _submitForm() {
-    if (_formKey.currentState!.validate()) {
-      final customerData = Customer(
-        id: widget.customer?.id, // Important for update
-        name: _nameController.text.trim(),
-        phoneNumber:
-            _phoneController.text.trim().isNotEmpty
-                ? _phoneController.text.trim()
-                : null,
-        address:
-            _addressController.text.trim().isNotEmpty
-                ? _addressController.text.trim()
-                : null,
-      );
-
-      if (_isEditing) {
-        context.read<CustomerBloc>().add(
-          UpdateCustomer(widget.customer!.id!, customerData),
-        );
-      } else {
-        context.read<CustomerBloc>().add(AddCustomer(customerData));
-      }
-    }
+    if (!_formKey.currentState!.validate()) return;
+    final phone = _phoneController.text.trim();
+    final address = _addressController.text.trim();
+    context.read<CustomerBloc>().add(
+      SaveCustomer(
+        Customer(
+          id: widget.customer?.id,
+          name: _nameController.text.trim(),
+          phoneNumber: phone.isEmpty ? null : phone,
+          address: address.isEmpty ? null : address,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditing ? 'Edit Customer' : 'Add New Customer'),
+        title: Text(_isEditing ? 'Ubah Pelanggan' : 'Pelanggan Baru'),
+      ),
+      bottomNavigationBar: BottomActionBar(
+        child: BlocBuilder<CustomerBloc, CustomerState>(
+          builder: (context, state) {
+            final saving = state is CustomerSaving;
+            return FilledButton.icon(
+              onPressed: saving ? null : _submitForm,
+              icon:
+                  saving
+                      ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                      : const Icon(Icons.check),
+              label: Text(_isEditing ? 'Simpan Perubahan' : 'Tambah Pelanggan'),
+            );
+          },
+        ),
       ),
       body: BlocListener<CustomerBloc, CustomerState>(
         listener: (context, state) {
+          final messenger = ScaffoldMessenger.of(context);
           if (state is CustomerOperationSuccess) {
-            // Message is handled by CustomerListScreen's listener after pop
-            Navigator.of(
-              context,
-            ).pop(true); // Pop and return true to indicate success
-          } else if (state is CustomerError) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Error: ${state.message}'),
-                backgroundColor: Colors.red,
-              ),
-            );
+            showResultSnackBar(messenger, state.message);
+            Navigator.of(context).pop(true);
+          } else if (state is CustomerOperationFailure) {
+            showResultSnackBar(messenger, state.message, success: false);
           }
         },
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
           child: Form(
             key: _formKey,
             child: ListView(
               children: <Widget>[
                 TextFormField(
                   controller: _nameController,
+                  textCapitalization: TextCapitalization.words,
                   decoration: const InputDecoration(
-                    labelText: 'Customer Name*',
-                    hintText: 'Enter full name',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person),
+                    labelText: 'Nama pelanggan*',
+                    hintText: 'Masukkan nama lengkap',
+                    prefixIcon: Icon(Icons.person_outline),
                   ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
-                      return 'Please enter customer name';
+                      return 'Nama pelanggan wajib diisi';
                     }
                     if (value.trim().length < 2) {
-                      return 'Name must be at least 2 characters';
+                      return 'Nama minimal 2 karakter';
                     }
                     return null;
                   },
@@ -117,10 +121,9 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
                 TextFormField(
                   controller: _phoneController,
                   decoration: const InputDecoration(
-                    labelText: 'Phone Number',
-                    hintText: 'Enter phone number (optional)',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.phone),
+                    labelText: 'Nomor HP',
+                    hintText: 'Masukkan nomor HP (opsional)',
+                    prefixIcon: Icon(Icons.phone_outlined),
                   ),
                   keyboardType: TextInputType.phone,
                   validator: (value) {
@@ -129,7 +132,7 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
                       if (!RegExp(
                         r'^[+]*[(]{0,1}[0-9]{1,4}[)]{0,1}[-\s\./0-9]*$',
                       ).hasMatch(value)) {
-                        return 'Please enter a valid phone number';
+                        return 'Nomor HP tidak valid';
                       }
                     }
                     return null;
@@ -139,33 +142,13 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
                 TextFormField(
                   controller: _addressController,
                   decoration: const InputDecoration(
-                    labelText: 'Address',
-                    hintText: 'Enter address (optional)',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.location_on),
+                    labelText: 'Alamat',
+                    hintText: 'Masukkan alamat (opsional)',
+                    prefixIcon: Icon(Icons.location_on_outlined),
                   ),
                   keyboardType: TextInputType.multiline,
                   maxLines: 3,
                   minLines: 1,
-                ),
-                const SizedBox(height: 32),
-                BlocBuilder<CustomerBloc, CustomerState>(
-                  builder: (context, state) {
-                    if (state is CustomerLoading) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    return ElevatedButton.icon(
-                      icon: Icon(
-                        _isEditing ? Icons.save_alt : Icons.add_circle_outline,
-                      ),
-                      onPressed: _submitForm,
-                      label: Text(_isEditing ? 'Save Changes' : 'Add Customer'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        textStyle: const TextStyle(fontSize: 16),
-                      ),
-                    );
-                  },
                 ),
               ],
             ),

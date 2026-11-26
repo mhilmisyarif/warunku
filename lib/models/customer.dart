@@ -1,12 +1,13 @@
 class Customer {
-  final String? id; // Nullable for new customers before saving
+  /// Null for a customer that has not been saved yet.
+  final String? id;
   final String name;
   final String? phoneNumber;
   final String? address;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
-  Customer({
+  const Customer({
     this.id,
     required this.name,
     this.phoneNumber,
@@ -15,63 +16,49 @@ class Customer {
     this.updatedAt,
   });
 
-  factory Customer.fromJson(Map<String, dynamic> json) {
-    return Customer(
-      id: json['_id'] as String?,
-      name: json['name'] as String,
-      phoneNumber: json['phoneNumber'] as String?,
-      address: json['address'] as String?,
-      createdAt:
-          json['createdAt'] != null
-              ? DateTime.tryParse(json['createdAt'] as String)
-              : null,
-      updatedAt:
-          json['updatedAt'] != null
-              ? DateTime.tryParse(json['updatedAt'] as String)
-              : null,
-    );
-  }
+  String get initial => name.isNotEmpty ? name[0].toUpperCase() : '?';
 
-  Map<String, dynamic> toJson() {
-    return {
-      if (id != null) '_id': id,
-      'name': name,
-      if (phoneNumber != null) 'phoneNumber': phoneNumber,
-      if (address != null) 'address': address,
-      // createdAt and updatedAt are usually handled by the backend
-    };
-  }
+  factory Customer.fromJson(Map<String, dynamic> json) => Customer(
+    id: json['_id'] as String?,
+    name: json['name'] as String? ?? '',
+    phoneNumber: json['phoneNumber'] as String?,
+    address: json['address'] as String?,
+    createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
+    updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? ''),
+  );
 
-  // For easy debugging
+  /// Body for create/update requests; timestamps and id are owned by the backend.
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    if (phoneNumber != null) 'phoneNumber': phoneNumber,
+    if (address != null) 'address': address,
+  };
+
   @override
-  String toString() {
-    return 'Customer{id: $id, name: $name, phoneNumber: $phoneNumber, address: $address}';
-  }
+  String toString() => 'Customer{id: $id, name: $name}';
 }
 
-// Helper class for paginated customer response (if your API returns it like that)
 class PaginatedCustomersResponse {
   final List<Customer> customers;
   final int currentPage;
   final int totalPages;
   final int totalCustomers;
 
-  PaginatedCustomersResponse({
+  const PaginatedCustomersResponse({
     required this.customers,
     required this.currentPage,
     required this.totalPages,
     required this.totalCustomers,
   });
 
-  factory PaginatedCustomersResponse.fromJson(Map<String, dynamic> json) {
-    return PaginatedCustomersResponse(
-      customers:
-          (json['customers'] as List<dynamic>)
-              .map((e) => Customer.fromJson(e as Map<String, dynamic>))
-              .toList(),
-      currentPage: json['currentPage'] as int,
-      totalPages: json['totalPages'] as int,
-      totalCustomers: json['totalCustomers'] as int,
-    );
-  }
+  factory PaginatedCustomersResponse.fromJson(Map<String, dynamic> json) =>
+      PaginatedCustomersResponse(
+        customers:
+            (json['customers'] as List<dynamic>? ?? [])
+                .map((e) => Customer.fromJson(e as Map<String, dynamic>))
+                .toList(),
+        currentPage: json['currentPage'] as int? ?? 1,
+        totalPages: json['totalPages'] as int? ?? 1,
+        totalCustomers: json['totalCustomers'] as int? ?? 0,
+      );
 }

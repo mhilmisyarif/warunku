@@ -1,6 +1,6 @@
-// lib/blocs/customer/customer_bloc.dart
-import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
 import '../../models/customer.dart';
 import '../../services/customer_service.dart';
 
@@ -8,145 +8,112 @@ part 'customer_event.dart';
 part 'customer_state.dart';
 
 class CustomerBloc extends Bloc<CustomerEvent, CustomerState> {
-  final CustomerService customerService;
-
-  CustomerBloc({required this.customerService}) : super(CustomerInitial()) {
-    on<LoadCustomers>(_onLoadCustomers);
-    on<LoadCustomerById>(_onLoadCustomerById);
-    on<AddCustomer>(_onAddCustomer);
-    on<UpdateCustomer>(_onUpdateCustomer);
-    on<DeleteCustomer>(_onDeleteCustomer);
+  CustomerBloc(this._service) : super(CustomerInitial()) {
+    on<LoadCustomers>(_onLoad);
+    on<LoadMoreCustomers>(_onLoadMore);
+    on<SaveCustomer>(_onSave);
+    on<DeleteCustomer>(_onDelete);
   }
 
-  Future<void> _onLoadCustomers(
-    LoadCustomers event,
-    Emitter<CustomerState> emit,
-  ) async {
-    final currentState = state;
-    // If it's not the first page load and we are already loading, or have reached max, do nothing
-    if (event.page > 1 &&
-        (currentState is CustomerLoading ||
-            (currentState is CustomersLoaded && currentState.hasReachedMax))) {
-      return;
-    }
+  final CustomerService _service;
+  String _searchTerm = '';
 
-    // For page 1, always show loading. For subsequent pages, only show if not already CustomersLoaded.
-    if (event.page == 1 || currentState is! CustomersLoaded) {
-      emit(CustomerLoading());
-    }
-
-    try {
-      final paginatedResponse = await customerService.getCustomers(
-        searchTerm: event.searchTerm,
-        page: event.page,
-        limit: event.limit,
-      );
-
-      if (currentState is CustomersLoaded && event.page > 1) {
-        // Append new customers for infinite scrolling/load more
-        emit(
-          paginatedResponse.customers.isEmpty
-              ? currentState.copyWith(hasReachedMax: true)
-              : currentState.copyWith(
-                customers: currentState.customers + paginatedResponse.customers,
-                currentPage: paginatedResponse.currentPage,
-                totalPages: paginatedResponse.totalPages,
-                hasReachedMax:
-                    paginatedResponse.customers.isEmpty ||
-                    paginatedResponse.currentPage >=
-                        paginatedResponse.totalPages,
-              ),
-        );
-      } else {
-        // First load or refresh
-        emit(
-          CustomersLoaded(
-            customers: paginatedResponse.customers,
-            currentPage: paginatedResponse.currentPage,
-            totalPages: paginatedResponse.totalPages,
-            totalCustomers: paginatedResponse.totalCustomers,
-            hasReachedMax:
-                paginatedResponse.customers.isEmpty ||
-                paginatedResponse.currentPage >= paginatedResponse.totalPages,
-          ),
-        );
-      }
-    } catch (e) {
-      emit(CustomerError("Failed to load customers: ${e.toString()}"));
-    }
-  }
-
-  Future<void> _onLoadCustomerById(
-    LoadCustomerById event,
-    Emitter<CustomerState> emit,
-  ) async {
+  Future<void> _onLoad(LoadCustomers event, Emitter<CustomerState> emit) async {
+    _searchTerm = event.searchTerm;
     emit(CustomerLoading());
     try {
-      final customer = await customerService.getCustomerById(event.customerId);
-      emit(CustomerLoaded(customer));
-    } catch (e) {
-      emit(CustomerError("Failed to load customer details: ${e.toString()}"));
-    }
-  }
-
-  Future<void> _onAddCustomer(
-    AddCustomer event,
-    Emitter<CustomerState> emit,
-  ) async {
-    emit(CustomerLoading()); // Or a specific CustomerAdding state
-    try {
-      final newCustomer = await customerService.createCustomer(event.customer);
+      final page = await _service.getCustomers(searchTerm: event.searchTerm);
+      // Drop results of a search that has since been superseded.
+      if (event.searchTerm != _searchTerm) return;
       emit(
-        CustomerOperationSuccess(
-          message: "Customer added successfully!",
-          customer: newCustomer,
+        CustomersLoaded(
+          customers: page.customers,
+          searchTerm: event.searchTerm,
+          currentPage: page.currentPage,
+          hasReachedMax: page.currentPage >= page.totalPages,
         ),
       );
-      // Optionally, you can dispatch LoadCustomers again to refresh the list,
-      // or the UI can react to CustomerOperationSuccess to update itself.
-      // add(const LoadCustomers()); // Example: refresh list
     } catch (e) {
-      emit(CustomerError("Failed to add customer: ${e.toString()}"));
+      if (event.searchTerm != _searchTerm) return;
+      emit(CustomerError('Gagal memuat pelanggan: $e'));
     }
   }
 
-  Future<void> _onUpdateCustomer(
-    UpdateCustomer event,
+  Future<void> _onLoadMore(
+    LoadMoreCustomers event,
     Emitter<CustomerState> emit,
   ) async {
-    emit(CustomerLoading()); // Or a specific CustomerUpdating state
+    final current = state;
+    if (current is! CustomersLoaded ||
+        current.hasReachedMax ||
+        current.isLoadingMore) {
+      return;
+    }
+    emit(current.copyWith(isLoadingMore: true));
     try {
-      final updatedCustomer = await customerService.updateCustomer(
-        event.customerId,
-        event.customer,
+      final page = await _service.getCustomers(
+        searchTerm: current.searchTerm,
+        page: current.currentPage + 1,
       );
+      final latest = state;
+      // Ignore if the list was reloaded (e.g. new search) meanwhile.
+      if (latest is! CustomersLoaded ||
+          latest.searchTerm != current.searchTerm) {
+        return;
+      }
+      final knownIds = latest.customers.map((c) => c.id).toSet();
       emit(
-        CustomerOperationSuccess(
-          message: "Customer updated successfully!",
-          customer: updatedCustomer,
+        latest.copyWith(
+          customers: [
+            ...latest.customers,
+            ...page.customers.where((c) => !knownIds.contains(c.id)),
+          ],
+          currentPage: page.currentPage,
+          hasReachedMax:
+              page.customers.isEmpty || page.currentPage >= page.totalPages,
+          isLoadingMore: false,
         ),
       );
-      // add(const LoadCustomers()); // Example: refresh list
-    } catch (e) {
-      emit(CustomerError("Failed to update customer: ${e.toString()}"));
+    } catch (_) {
+      final latest = state;
+      if (latest is CustomersLoaded) {
+        emit(latest.copyWith(isLoadingMore: false));
+      }
     }
   }
 
-  Future<void> _onDeleteCustomer(
+  Future<void> _onSave(SaveCustomer event, Emitter<CustomerState> emit) async {
+    final customer = event.customer;
+    final isNew = customer.id == null;
+    emit(CustomerSaving());
+    try {
+      if (isNew) {
+        await _service.createCustomer(customer);
+      } else {
+        await _service.updateCustomer(customer.id!, customer);
+      }
+      emit(
+        CustomerOperationSuccess(
+          isNew ? 'Pelanggan ditambahkan.' : 'Pelanggan diperbarui.',
+        ),
+      );
+      add(LoadCustomers(searchTerm: _searchTerm));
+    } catch (e) {
+      emit(CustomerOperationFailure('Gagal menyimpan pelanggan: $e'));
+    }
+  }
+
+  Future<void> _onDelete(
     DeleteCustomer event,
     Emitter<CustomerState> emit,
   ) async {
-    emit(CustomerLoading()); // Or a specific CustomerDeleting state
+    emit(CustomerSaving());
     try {
-      await customerService.deleteCustomer(event.customerId);
-      emit(
-        const CustomerOperationSuccess(
-          message: "Customer deleted successfully!",
-        ),
-      );
-      // add(const LoadCustomers()); // Example: refresh list
+      await _service.deleteCustomer(event.customerId);
+      emit(const CustomerOperationSuccess('Pelanggan dihapus.'));
+      add(LoadCustomers(searchTerm: _searchTerm));
     } catch (e) {
-      emit(CustomerError("Failed to delete customer: ${e.toString()}"));
+      emit(CustomerOperationFailure('Gagal menghapus pelanggan: $e'));
     }
   }
 }
